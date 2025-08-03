@@ -1,0 +1,217 @@
+{% extends "base.html" %}
+
+{% block title %}Parking Spaces - Smart Parking System{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h1 class="h2 mb-0">
+            <i class="bi bi-grid-3x3 me-2"></i>
+            Parking Space Management
+        </h1>
+        <p class="text-muted">Define and manage parking spaces for automated detection</p>
+    </div>
+</div>
+
+<!-- Add New Parking Space -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-plus-circle me-2"></i>
+                    Add New Parking Space
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-lg-8">
+                        <div id="canvas-container" class="border rounded bg-dark position-relative">
+                            <canvas id="parking-canvas" 
+                                    width="800" 
+                                    height="600" 
+                                    class="w-100 h-auto"
+                                    style="cursor: crosshair;">
+                            </canvas>
+                            <div class="position-absolute top-0 end-0 m-2">
+                                <button class="btn btn-sm btn-secondary" id="clear-selection">
+                                    <i class="bi bi-eraser me-1"></i>Clear
+                                </button>
+                            </div>
+                        </div>
+                        <div class="mt-2">
+                            <small class="text-muted">
+                                <i class="bi bi-info-circle me-1"></i>
+                                Click and drag to define a parking space rectangle
+                            </small>
+                        </div>
+                    </div>
+                    
+                    <div class="col-lg-4">
+                        <form id="add-space-form">
+                            <div class="mb-3">
+                                <label for="space-name" class="form-label">Space Name</label>
+                                <input type="text" class="form-control" id="space-name" placeholder="e.g., A1, B2, Spot 1" required>
+                            </div>
+                            
+                            <div class="row">
+                                <div class="col-6">
+                                    <div class="mb-3">
+                                        <label for="x1" class="form-label">X1</label>
+                                        <input type="number" class="form-control" id="x1" readonly>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="mb-3">
+                                        <label for="y1" class="form-label">Y1</label>
+                                        <input type="number" class="form-control" id="y1" readonly>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="row">
+                                <div class="col-6">
+                                    <div class="mb-3">
+                                        <label for="x2" class="form-label">X2</label>
+                                        <input type="number" class="form-control" id="x2" readonly>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="mb-3">
+                                        <label for="y2" class="form-label">Y2</label>
+                                        <input type="number" class="form-control" id="y2" readonly>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <button type="submit" class="btn btn-primary w-100" id="add-space-btn" disabled>
+                                <i class="bi bi-plus-lg me-2"></i>
+                                Add Parking Space
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Existing Parking Spaces -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-list me-2"></i>
+                    Existing Parking Spaces
+                </h5>
+                <span class="badge bg-primary">{{ spaces|length }} spaces</span>
+            </div>
+            <div class="card-body">
+                {% if spaces %}
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Coordinates</th>
+                                    <th>Status</th>
+                                    <th>Created</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for space in spaces %}
+                                <tr id="space-row-{{ space.id }}">
+                                    <td>
+                                        <strong>{{ space.name }}</strong>
+                                    </td>
+                                    <td>
+                                        <small class="text-muted">
+                                            ({{ space.x1 }}, {{ space.y1 }}) - ({{ space.x2 }}, {{ space.y2 }})
+                                        </small>
+                                    </td>
+                                    <td>
+                                        {% if space.is_occupied %}
+                                            <span class="badge bg-danger">
+                                                <i class="bi bi-car-front me-1"></i>Occupied
+                                            </span>
+                                        {% else %}
+                                            <span class="badge bg-success">
+                                                <i class="bi bi-check-circle me-1"></i>Available
+                                            </span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <small class="text-muted">
+                                            {{ space.created_at.strftime('%Y-%m-%d %H:%M') }}
+                                        </small>
+                                    </td>
+                                    <td>
+                                        <div class="btn-group btn-group-sm" role="group">
+                                            <button type="button" 
+                                                    class="btn btn-outline-primary highlight-space-btn"
+                                                    data-space-id="{{ space.id }}"
+                                                    data-x1="{{ space.x1 }}"
+                                                    data-y1="{{ space.y1 }}"
+                                                    data-x2="{{ space.x2 }}"
+                                                    data-y2="{{ space.y2 }}"
+                                                    title="Highlight on canvas">
+                                                <i class="bi bi-eye"></i>
+                                            </button>
+                                            <button type="button" 
+                                                    class="btn btn-outline-danger delete-space-btn"
+                                                    data-space-id="{{ space.id }}"
+                                                    data-space-name="{{ space.name }}"
+                                                    title="Delete space">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <div class="text-center text-muted py-5">
+                        <i class="bi bi-grid-3x3" style="font-size: 4rem;"></i>
+                        <h4 class="mt-3">No Parking Spaces Defined</h4>
+                        <p class="mb-0">Use the canvas above to define your first parking space</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="bi bi-exclamation-triangle me-2"></i>
+                    Confirm Deletion
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to delete parking space <strong id="delete-space-name"></strong>?</p>
+                <p class="text-muted small">This action cannot be undone. Any associated parking sessions will remain in the database.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="confirm-delete-btn">
+                    <i class="bi bi-trash me-2"></i>
+                    Delete Space
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/parking_spaces.js') }}"></script>
+{% endblock %}

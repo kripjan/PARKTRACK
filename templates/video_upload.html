@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+
+{% block title %}Video Processing - Smart Parking System{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h1 class="h2 mb-0">
+            <i class="bi bi-camera-video me-2"></i>
+            Video Processing
+        </h1>
+        <p class="text-muted">Upload and process video files for vehicle detection and license plate recognition</p>
+    </div>
+</div>
+
+<!-- Video Upload Section -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-cloud-upload me-2"></i>
+                    Upload Video File
+                </h5>
+            </div>
+            <div class="card-body">
+                <form action="{{ url_for('upload_video') }}" method="post" enctype="multipart/form-data" id="uploadForm">
+                    <div class="mb-3">
+                        <label for="video" class="form-label">Select Video File</label>
+                        <input type="file" class="form-control" id="video" name="video" accept=".mp4,.avi,.mov,.mkv" required>
+                        <div class="form-text">
+                            Supported formats: MP4, AVI, MOV, MKV (Max size: 100MB)
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="processLicensePlates" checked>
+                            <label class="form-check-label" for="processLicensePlates">
+                                Enable license plate recognition
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="trackVehicles" checked>
+                            <label class="form-check-label" for="trackVehicles">
+                                Enable vehicle tracking
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="calculateTolls" checked>
+                            <label class="form-check-label" for="calculateTolls">
+                                Automatically calculate parking tolls
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary" id="uploadBtn">
+                        <i class="bi bi-upload me-2"></i>
+                        Upload and Process Video
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Processing Status -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-gear me-2"></i>
+                    Processing Status
+                </h5>
+            </div>
+            <div class="card-body">
+                <div id="processing-status" class="text-center py-4">
+                    <i class="bi bi-hourglass text-muted" style="font-size: 3rem;"></i>
+                    <p class="text-muted mt-2">No video processing in progress</p>
+                </div>
+                
+                <div id="processing-progress" class="d-none">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span>Processing Progress</span>
+                        <span id="progress-percentage">0%</span>
+                    </div>
+                    <div class="progress mb-3">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                             role="progressbar" 
+                             style="width: 0%" 
+                             id="progress-bar">
+                        </div>
+                    </div>
+                    
+                    <div class="row text-center">
+                        <div class="col-md-3">
+                            <div class="card bg-light">
+                                <div class="card-body">
+                                    <h4 class="text-primary mb-1" id="vehicles-detected">0</h4>
+                                    <small class="text-muted">Vehicles Detected</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card bg-light">
+                                <div class="card-body">
+                                    <h4 class="text-success mb-1" id="plates-recognized">0</h4>
+                                    <small class="text-muted">License Plates</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card bg-light">
+                                <div class="card-body">
+                                    <h4 class="text-warning mb-1" id="sessions-created">0</h4>
+                                    <small class="text-muted">Parking Sessions</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card bg-light">
+                                <div class="card-body">
+                                    <h4 class="text-info mb-1" id="frames-processed">0</h4>
+                                    <small class="text-muted">Frames Processed</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Uploads -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-clock-history me-2"></i>
+                    Processing History
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>File Name</th>
+                                <th>Upload Time</th>
+                                <th>Duration</th>
+                                <th>Vehicles Detected</th>
+                                <th>License Plates</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="processing-history">
+                            <tr>
+                                <td colspan="7" class="text-center text-muted py-4">
+                                    <i class="bi bi-folder-x" style="font-size: 2rem;"></i>
+                                    <p class="mt-2">No video processing history available</p>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Upload Progress Modal -->
+<div class="modal fade" id="uploadModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="bi bi-cloud-upload me-2"></i>
+                    Uploading Video
+                </h5>
+            </div>
+            <div class="modal-body text-center">
+                <div class="spinner-border text-primary mb-3" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mb-2">Uploading your video file...</p>
+                <div class="progress">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                         role="progressbar" 
+                         style="width: 0%" 
+                         id="upload-progress-bar">
+                    </div>
+                </div>
+                <small class="text-muted mt-2">This may take a few minutes depending on file size</small>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/video_upload.js') }}"></script>
+{% endblock %}
