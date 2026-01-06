@@ -1,0 +1,366 @@
+{% extends "base.html" %} {% block title %}Reports & Analytics - Smart Parking
+System{% endblock %} {% block content %}
+<div class="row mb-4">
+  <div class="col-12">
+    <h1 class="h2 mb-0">
+      <i class="bi bi-graph-up me-2"></i>
+      Reports & Analytics
+    </h1>
+    <p class="text-muted">
+      Comprehensive insights into parking system performance and revenue
+    </p>
+  </div>
+</div>
+
+<!-- Summary Cards -->
+<div class="row mb-4">
+  <div class="col-lg-3 col-md-6 mb-3">
+    <div class="card bg-primary">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center">
+          <div>
+            <h3 class="card-title text-white mb-1" id="total-revenue">
+              ${{ daily_revenue | sum(attribute='revenue') | default(0) |
+              round(2) }}
+            </h3>
+            <p class="card-text text-white-50 mb-0">7-Day Revenue</p>
+          </div>
+          <i
+            class="bi bi-currency-dollar text-white"
+            style="font-size: 2rem"
+          ></i>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-3 col-md-6 mb-3">
+    <div class="card bg-success">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center">
+          <div>
+            <h3 class="card-title text-white mb-1">
+              {{ top_vehicles | length }}
+            </h3>
+            <p class="card-text text-white-50 mb-0">Regular Customers</p>
+          </div>
+          <i class="bi bi-people-fill text-white" style="font-size: 2rem"></i>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-3 col-md-6 mb-3">
+    <div class="card bg-info">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center">
+          <div>
+            <h3 class="card-title text-white mb-1">
+              {{ (daily_revenue | sum(attribute='revenue') / 7) | round(2) if
+              daily_revenue else 0 }}
+            </h3>
+            <p class="card-text text-white-50 mb-0">Avg Daily Revenue</p>
+          </div>
+          <i class="bi bi-graph-up text-white" style="font-size: 2rem"></i>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-3 col-md-6 mb-3">
+    <div class="card bg-warning">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center">
+          <div>
+            <h3 class="card-title text-dark mb-1">
+              {{ hourly_occupancy | sum(attribute='count') }}
+            </h3>
+            <p class="card-text text-dark mb-0">Today's Entries</p>
+          </div>
+          <i class="bi bi-car-front-fill text-dark" style="font-size: 2rem"></i>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Charts Row -->
+<div class="row mb-4">
+  <div class="col-lg-8 mb-3">
+    <div class="card h-100">
+      <div class="card-header">
+        <h5 class="card-title mb-0">
+          <i class="bi bi-bar-chart me-2"></i>
+          Daily Revenue (Last 7 Days)
+        </h5>
+      </div>
+      <div class="card-body">
+        <canvas id="revenueChart" height="300"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-4 mb-3">
+    <div class="card h-100">
+      <div class="card-header">
+        <h5 class="card-title mb-0">
+          <i class="bi bi-clock me-2"></i>
+          Hourly Occupancy (Today)
+        </h5>
+      </div>
+      <div class="card-body">
+        <canvas id="occupancyChart" height="300"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Top Vehicles Table -->
+<div class="row mb-4">
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header">
+        <h5 class="card-title mb-0">
+          <i class="bi bi-trophy me-2"></i>
+          Top Vehicles (Most Frequent Visitors)
+        </h5>
+      </div>
+      <div class="card-body">
+        {% if top_vehicles %}
+        <div class="table-responsive">
+          <table class="table table-hover">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>License Plate</th>
+                <th>Total Visits</th>
+                <th>Total Paid</th>
+                <th>Average per Visit</th>
+                <th>Customer Type</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for vehicle in top_vehicles %}
+              <tr>
+                <td>{{ loop.index }}</td>
+                <td>
+                  <strong>{{ vehicle.license_plate }}</strong>
+                </td>
+                <td>
+                  <span class="badge bg-primary"
+                    >{{ vehicle.total_visits }}</span
+                  >
+                </td>
+                <td>
+                  <strong>${{ "%.2f"|format(vehicle.total_paid or 0) }}</strong>
+                </td>
+                <td>
+                  ${{ "%.2f"|format((vehicle.total_paid or 0) /
+                  vehicle.total_visits) }}
+                </td>
+                <td>
+                  {% if vehicle.total_visits >= 20 %}
+                  <span class="badge bg-warning text-dark">
+                    <i class="bi bi-star-fill me-1"></i>Premium
+                  </span>
+                  {% elif vehicle.total_visits >= 10 %}
+                  <span class="badge bg-info">
+                    <i class="bi bi-bookmark-fill me-1"></i>Regular
+                  </span>
+                  {% else %}
+                  <span class="badge bg-secondary">
+                    <i class="bi bi-person me-1"></i>Occasional
+                  </span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="text-center text-muted py-4">
+          <i class="bi bi-car-front" style="font-size: 3rem"></i>
+          <p class="mt-2">No vehicle data available yet</p>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Export Options -->
+<div class="row">
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header">
+        <h5 class="card-title mb-0">
+          <i class="bi bi-download me-2"></i>
+          Export Data
+        </h5>
+      </div>
+      <div class="card-body">
+        <div class="row">
+          <div class="col-md-4 mb-3">
+            <div class="card bg-light">
+              <div class="card-body text-center">
+                <i
+                  class="bi bi-file-earmark-text text-primary"
+                  style="font-size: 2rem"
+                ></i>
+                <h6 class="mt-2">Daily Report</h6>
+                <button
+                  class="btn btn-sm btn-primary"
+                  onclick="exportReport('daily')"
+                >
+                  <i class="bi bi-download me-1"></i>Download CSV
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-md-4 mb-3">
+            <div class="card bg-light">
+              <div class="card-body text-center">
+                <i
+                  class="bi bi-file-earmark-bar-graph text-success"
+                  style="font-size: 2rem"
+                ></i>
+                <h6 class="mt-2">Revenue Report</h6>
+                <button
+                  class="btn btn-sm btn-success"
+                  onclick="exportReport('revenue')"
+                >
+                  <i class="bi bi-download me-1"></i>Download CSV
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-md-4 mb-3">
+            <div class="card bg-light">
+              <div class="card-body text-center">
+                <i
+                  class="bi bi-file-earmark-person text-info"
+                  style="font-size: 2rem"
+                ></i>
+                <h6 class="mt-2">Vehicle Report</h6>
+                <button
+                  class="btn btn-sm btn-info"
+                  onclick="exportReport('vehicles')"
+                >
+                  <i class="bi bi-download me-1"></i>Download CSV
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block scripts %}
+<script>
+  // Revenue Chart Data
+  const revenueData = {
+      labels: [
+          {% for item in daily_revenue %}
+              '{{ item.date.strftime("%m/%d") }}'{{ "," if not loop.last }}
+          {% endfor %}
+      ],
+      datasets: [{
+          label: 'Daily Revenue',
+          data: [
+              {% for item in daily_revenue %}
+                  {{ item.revenue or 0 }}{{ "," if not loop.last }}
+              {% endfor %}
+          ],
+          backgroundColor: 'rgba(13, 110, 253, 0.8)',
+          borderColor: 'rgba(13, 110, 253, 1)',
+          borderWidth: 2
+      }]
+  };
+
+  // Hourly Occupancy Data
+  const occupancyData = {
+      labels: [
+          {% for item in hourly_occupancy %}
+              '{{ "%02d"|format(item.hour|int) }}:00'{{ "," if not loop.last }}
+          {% endfor %}
+      ],
+      datasets: [{
+          label: 'Vehicle Entries',
+          data: [
+              {% for item in hourly_occupancy %}
+                  {{ item.count }}{{ "," if not loop.last }}
+              {% endfor %}
+          ],
+          backgroundColor: 'rgba(25, 135, 84, 0.8)',
+          borderColor: 'rgba(25, 135, 84, 1)',
+          borderWidth: 2
+      }]
+  };
+
+  // Initialize Charts
+  document.addEventListener('DOMContentLoaded', function() {
+      // Revenue Chart
+      const revenueCtx = document.getElementById('revenueChart').getContext('2d');
+      new Chart(revenueCtx, {
+          type: 'bar',
+          data: revenueData,
+          options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                  legend: {
+                      display: false
+                  }
+              },
+              scales: {
+                  y: {
+                      beginAtZero: true,
+                      ticks: {
+                          callback: function(value) {
+                              return '$' + value.toFixed(2);
+                          }
+                      }
+                  }
+              }
+          }
+      });
+
+      // Occupancy Chart
+      const occupancyCtx = document.getElementById('occupancyChart').getContext('2d');
+      new Chart(occupancyCtx, {
+          type: 'line',
+          data: occupancyData,
+          options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                  legend: {
+                      display: false
+                  }
+              },
+              scales: {
+                  y: {
+                      beginAtZero: true
+                  }
+              },
+              elements: {
+                  point: {
+                      radius: 4,
+                      hoverRadius: 6
+                  }
+              }
+          }
+      });
+  });
+
+  // Export Functions
+  function exportReport(type) {
+      // In a real implementation, this would trigger a server-side export
+      alert(`Exporting ${type} report... (Feature to be implemented)`);
+  }
+</script>
+{% endblock %}

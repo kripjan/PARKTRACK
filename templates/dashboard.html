@@ -1,0 +1,284 @@
+{% extends "base.html" %} {% block title %}Dashboard - Smart Parking System{%
+endblock %} {% block content %}
+<div class="row mb-4">
+  <div class="col-12">
+    <h1 class="h2 mb-0">
+      <i class="bi bi-speedometer2 me-2"></i>
+      Real-time Dashboard
+    </h1>
+    <p class="text-muted">
+      Live monitoring of parking spaces and vehicle activity
+    </p>
+  </div>
+</div>
+
+<!-- Live Feed Controls -->
+<div class="row mb-4">
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header">
+        <h5 class="card-title mb-0">
+          <i class="bi bi-camera-video me-2"></i>
+          Live Video Feed Control
+        </h5>
+      </div>
+      <div class="card-body">
+        <div class="row">
+          <div class="col-md-6 mb-3">
+            <form
+              action="{{ url_for('start_live_feed_ui') }}"
+              method="post"
+              class="d-inline"
+            >
+              <div class="input-group">
+                <input
+                  type="number"
+                  class="form-control"
+                  name="camera_index"
+                  value="0"
+                  min="0"
+                  max="10"
+                  placeholder="Camera Index"
+                />
+                <button type="submit" class="btn btn-success">
+                  <i class="bi bi-play-fill me-1"></i>
+                  Start Live Feed
+                </button>
+              </div>
+            </form>
+          </div>
+          <div class="col-md-6 mb-3">
+            <form
+              action="{{ url_for('stop_live_feed') }}"
+              method="post"
+              class="d-inline"
+            >
+              <button type="submit" class="btn btn-danger">
+                <i class="bi bi-stop-fill me-1"></i>
+                Stop Live Feed
+              </button>
+            </form>
+          </div>
+        </div>
+        <div class="row">
+          <div class="col-12">
+            <div id="feed-status" class="alert alert-info d-none" role="alert">
+              <i class="bi bi-info-circle me-2"></i>
+              <span id="feed-status-text">Waiting for status update...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Statistics Cards -->
+<div class="row mb-4">
+  <div class="col-lg-3 col-md-6 mb-3">
+    <div class="card bg-primary">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center">
+          <div>
+            <h3 class="card-title text-white mb-1" id="total-spaces">
+              {{ total_spaces }}
+            </h3>
+            <p class="card-text text-white-50 mb-0">Total Spaces</p>
+          </div>
+          <i class="bi bi-grid-3x3 text-white" style="font-size: 2rem"></i>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-3 col-md-6 mb-3">
+    <div class="card bg-danger">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center">
+          <div>
+            <h3 class="card-title text-white mb-1" id="occupied-spaces">
+              {{ occupied_spaces }}
+            </h3>
+            <p class="card-text text-white-50 mb-0">Occupied</p>
+          </div>
+          <i
+            class="bi bi-car-front-fill text-white"
+            style="font-size: 2rem"
+          ></i>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-3 col-md-6 mb-3">
+    <div class="card bg-success">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center">
+          <div>
+            <h3 class="card-title text-white mb-1" id="available-spaces">
+              {{ available_spaces }}
+            </h3>
+            <p class="card-text text-white-50 mb-0">Available</p>
+          </div>
+          <i
+            class="bi bi-check-circle-fill text-white"
+            style="font-size: 2rem"
+          ></i>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-3 col-md-6 mb-3">
+    <div class="card bg-warning">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center">
+          <div>
+            <h3 class="card-title text-dark mb-1">
+              ${{ "%.2f"|format(today_revenue) }}
+            </h3>
+            <p class="card-text text-dark mb-0">Today's Revenue</p>
+          </div>
+          <i
+            class="bi bi-currency-dollar text-dark"
+            style="font-size: 2rem"
+          ></i>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Active Sessions and Recent Activity -->
+<div class="row mb-4">
+  <div class="col-lg-8 mb-3">
+    <div class="card h-100">
+      <div class="card-header">
+        <h5 class="card-title mb-0">
+          <i class="bi bi-clock-history me-2"></i>
+          Active Parking Sessions
+        </h5>
+      </div>
+      <div class="card-body">
+        {% if active_sessions %}
+        <div class="table-responsive">
+          <table class="table table-hover">
+            <thead>
+              <tr>
+                <th>License Plate</th>
+                <th>Parking Space</th>
+                <th>Entry Time</th>
+                <th>Duration</th>
+                <th>Estimated Cost</th>
+              </tr>
+            </thead>
+            <tbody id="active-sessions">
+              {% for session in active_sessions %}
+              <tr>
+                <td><strong>{{ session.vehicle.license_plate }}</strong></td>
+                <td>
+                  {% if session.parking_space %}
+                  <span class="badge bg-secondary"
+                    >{{ session.parking_space.name }}</span
+                  >
+                  {% else %}
+                  <span class="badge bg-warning text-dark">Unassigned</span>
+                  {% endif %}
+                </td>
+                <td>{{ session.entry_time.strftime('%H:%M:%S') }}</td>
+                <td>
+                  <span
+                    class="duration-counter"
+                    data-entry-time="{{ session.entry_time.isoformat() }}"
+                  >
+                    Calculating...
+                  </span>
+                </td>
+                <td>
+                  <span
+                    class="cost-counter"
+                    data-entry-time="{{ session.entry_time.isoformat() }}"
+                  >
+                    $0.00
+                  </span>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="text-center text-muted py-4">
+          <i class="bi bi-car-front" style="font-size: 3rem"></i>
+          <p class="mt-2">No active parking sessions</p>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-4 mb-3">
+    <div class="card h-100">
+      <div class="card-header">
+        <h5 class="card-title mb-0">
+          <i class="bi bi-activity me-2"></i>
+          Recent Activity
+        </h5>
+      </div>
+      <div class="card-body">
+        <div id="recent-activity" style="max-height: 400px; overflow-y: auto">
+          {% for detection in recent_detections %}
+          <div class="d-flex align-items-center mb-3">
+            <div class="flex-shrink-0">
+              {% if detection.detection_type == 'entry' %}
+              <i
+                class="bi bi-arrow-right-circle text-success"
+                style="font-size: 1.5rem"
+              ></i>
+              {% elif detection.detection_type == 'exit' %}
+              <i
+                class="bi bi-arrow-left-circle text-danger"
+                style="font-size: 1.5rem"
+              ></i>
+              {% else %}
+              <i class="bi bi-eye text-info" style="font-size: 1.5rem"></i>
+              {% endif %}
+            </div>
+            <div class="flex-grow-1 ms-3">
+              <div class="small text-muted">
+                {{ detection.timestamp.strftime('%H:%M:%S') }}
+              </div>
+              <div>
+                {% if detection.license_plate %}
+                <strong>{{ detection.license_plate }}</strong>
+                {% else %} {{ detection.vehicle_count }} vehicles detected {%
+                endif %}
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Real-time Vehicle Detection Chart -->
+<div class="row">
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header">
+        <h5 class="card-title mb-0">
+          <i class="bi bi-graph-up me-2"></i>
+          Real-time Vehicle Detection
+        </h5>
+      </div>
+      <div class="card-body">
+        <canvas id="detectionChart" height="100"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block scripts %}
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %}
