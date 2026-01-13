@@ -11,7 +11,7 @@ class Base(DeclarativeBase):
     pass
 
 db = SQLAlchemy(model_class=Base)
-migrate=Migrate()
+migrate = Migrate()
 socketio = SocketIO()
 
 # create the app
@@ -33,13 +33,21 @@ os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
 
 # initialize extensions
 db.init_app(app)
-migrate.init_app(app,db)
+migrate.init_app(app, db)
 # Initialize SocketIO with less strict configuration for development
 socketio.init_app(app, cors_allowed_origins="*", async_mode='threading')
+
+# Import routes BEFORE creating tables to register them
+import routes
 
 with app.app_context():
     # Import models to ensure tables are created
     from models import Vehicle, ParkingSession, ParkingSpace, DetectionLog, SystemConfig
     
-# Import routes
-import routes
+    # Create all tables
+    db.create_all()
+    
+    # Optional: Initialize default data if needed
+    # if ParkingSpace.query.count() == 0:
+    #     # Add default parking spaces
+    #     pass

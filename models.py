@@ -1,11 +1,5 @@
 from datetime import datetime
-from sqlalchemy.orm import DeclarativeBase
-from flask_sqlalchemy import SQLAlchemy
-
-class Base(DeclarativeBase):
-    pass
-
-db = SQLAlchemy(model_class=Base)
+from app import db  # ✅ Import db from app.py instead of creating a new one
 from sqlalchemy import func
 
 class Vehicle(db.Model):
@@ -28,14 +22,13 @@ class ParkingSpace(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(50), nullable=False)
-    x1 = db.Column(db.Integer, nullable=False)  # Top-left x coordinate
-    y1 = db.Column(db.Integer, nullable=False)  # Top-left y coordinate
-    x2 = db.Column(db.Integer, nullable=False)  # Bottom-right x coordinate
-    y2 = db.Column(db.Integer, nullable=False)  # Bottom-right y coordinate
+    x1 = db.Column(db.Integer, nullable=False)
+    y1 = db.Column(db.Integer, nullable=False)
+    x2 = db.Column(db.Integer, nullable=False)
+    y2 = db.Column(db.Integer, nullable=False)
     is_occupied = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
-    # Relationships
     parking_sessions = db.relationship('ParkingSession', backref='parking_space', lazy=True)
     
     def __repr__(self):
@@ -59,7 +52,6 @@ class ParkingSession(db.Model):
             duration = self.exit_time - self.entry_time
             self.duration_minutes = int(duration.total_seconds() / 60)
             
-            # Toll calculation: $2 for first hour, $1 for each additional hour
             if self.duration_minutes <= 60:
                 self.toll_amount = 2.0
             else:
@@ -76,7 +68,7 @@ class DetectionLog(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
-    detection_type = db.Column(db.String(20), nullable=False)  # 'entry' or 'exit'
+    detection_type = db.Column(db.String(20), nullable=False)
     license_plate = db.Column(db.String(20), nullable=True)
     confidence = db.Column(db.Float, nullable=True)
     vehicle_count = db.Column(db.Integer, default=0)
