@@ -1,94 +1,135 @@
 {% extends "base.html" %}
 
-{% block title %}Parking Spaces - Smart Parking System{% endblock %}
+{% block title %}ROI Configuration - Smart Parking System{% endblock %}
 
 {% block content %}
 <div class="row mb-4">
     <div class="col-12">
         <h1 class="h2 mb-0">
-            <i class="bi bi-grid-3x3 me-2"></i>
-            Parking Space Management
+            <i class="bi bi-bounding-box me-2"></i>
+            ROI Configuration
         </h1>
-        <p class="text-muted">Define and manage parking spaces for automated detection</p>
+        <p class="text-muted">Upload configuration file and CCTV frame to visualize parking space regions</p>
     </div>
 </div>
 
-<!-- Add New Parking Space -->
+<!-- Upload Configuration Section -->
 <div class="row mb-4">
-    <div class="col-12">
-        <div class="card">
+    <div class="col-lg-6 mb-3">
+        <div class="card h-100">
             <div class="card-header">
                 <h5 class="card-title mb-0">
-                    <i class="bi bi-plus-circle me-2"></i>
-                    Add New Parking Space
+                    <i class="bi bi-file-earmark-code me-2"></i>
+                    Upload ROI Configuration
                 </h5>
             </div>
             <div class="card-body">
-                <div class="row">
-                    <div class="col-lg-8">
-                        <div id="canvas-container" class="border rounded bg-dark position-relative">
-                            <canvas id="parking-canvas" 
-                                    width="800" 
-                                    height="600" 
-                                    class="w-100 h-auto"
-                                    style="cursor: crosshair;">
-                            </canvas>
-                            <div class="position-absolute top-0 end-0 m-2">
-                                <button class="btn btn-sm btn-secondary" id="clear-selection">
-                                    <i class="bi bi-eraser me-1"></i>Clear
-                                </button>
-                            </div>
-                        </div>
-                        <div class="mt-2">
-                            <small class="text-muted">
-                                <i class="bi bi-info-circle me-1"></i>
-                                Click and drag to define a parking space rectangle
-                            </small>
+                <form id="config-upload-form">
+                    <div class="mb-3">
+                        <label for="config-file" class="form-label">Configuration File (JSON)</label>
+                        <input type="file" class="form-control" id="config-file" accept=".json,.txt" required>
+                        <div class="form-text">
+                            Upload JSON file containing ROI definitions (lines, rectangles, polylines)
                         </div>
                     </div>
                     
-                    <div class="col-lg-4">
-                        <form id="add-space-form">
-                            <div class="mb-3">
-                                <label for="space-name" class="form-label">Space Name</label>
-                                <input type="text" class="form-control" id="space-name" placeholder="e.g., A1, B2, Spot 1" required>
+                    <div class="mb-3">
+                        <div class="card bg-dark">
+                            <div class="card-body">
+                                <h6 class="card-title text-white-50 mb-2">Expected JSON Format:</h6>
+                                <pre class="text-white-50 mb-0" style="font-size: 0.75rem;"><code>[
+  {
+    "type": "line",
+    "name": "frontgate",
+    "points": [[x1, y1], [x2, y2]]
+  },
+  {
+    "type": "rectangle",
+    "name": "a1",
+    "points": [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
+  }
+]</code></pre>
                             </div>
-                            
-                            <div class="row">
-                                <div class="col-6">
-                                    <div class="mb-3">
-                                        <label for="x1" class="form-label">X1</label>
-                                        <input type="number" class="form-control" id="x1" readonly>
-                                    </div>
-                                </div>
-                                <div class="col-6">
-                                    <div class="mb-3">
-                                        <label for="y1" class="form-label">Y1</label>
-                                        <input type="number" class="form-control" id="y1" readonly>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <div class="row">
-                                <div class="col-6">
-                                    <div class="mb-3">
-                                        <label for="x2" class="form-label">X2</label>
-                                        <input type="number" class="form-control" id="x2" readonly>
-                                    </div>
-                                </div>
-                                <div class="col-6">
-                                    <div class="mb-3">
-                                        <label for="y2" class="form-label">Y2</label>
-                                        <input type="number" class="form-control" id="y2" readonly>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <button type="submit" class="btn btn-primary w-100" id="add-space-btn" disabled>
-                                <i class="bi bi-plus-lg me-2"></i>
-                                Add Parking Space
-                            </button>
-                        </form>
+                        </div>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary w-100" id="upload-config-btn">
+                        <i class="bi bi-upload me-2"></i>
+                        Upload Configuration
+                    </button>
+                </form>
+                
+                <div id="config-status" class="mt-3"></div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-6 mb-3">
+        <div class="card h-100">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-camera me-2"></i>
+                    Upload CCTV Frame
+                </h5>
+            </div>
+            <div class="card-body">
+                <form id="frame-upload-form">
+                    <div class="mb-3">
+                        <label for="frame-file" class="form-label">Frame Image</label>
+                        <input type="file" class="form-control" id="frame-file" accept=".jpg,.jpeg,.png,.bmp" required>
+                        <div class="form-text">
+                            Upload a still frame from your CCTV camera (JPG, PNG, BMP)
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3" id="frame-preview-container" style="display: none;">
+                        <label class="form-label">Preview:</label>
+                        <img id="frame-preview" class="img-fluid rounded border" style="max-height: 300px;" alt="Frame preview">
+                    </div>
+                    
+                    <button type="submit" class="btn btn-success w-100" id="upload-frame-btn">
+                        <i class="bi bi-upload me-2"></i>
+                        Upload Frame
+                    </button>
+                </form>
+                
+                <div id="frame-status" class="mt-3"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Generate Preview Section -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-eye me-2"></i>
+                    ROI Preview
+                </h5>
+                <button class="btn btn-primary" id="generate-preview-btn" disabled>
+                    <i class="bi bi-arrow-repeat me-2"></i>
+                    Generate Preview
+                </button>
+            </div>
+            <div class="card-body">
+                <div id="preview-container" class="text-center">
+                    <div id="no-preview" class="py-5">
+                        <i class="bi bi-image text-muted" style="font-size: 4rem;"></i>
+                        <h5 class="text-muted mt-3">No Preview Available</h5>
+                        <p class="text-muted">Upload both configuration and frame files, then click "Generate Preview"</p>
+                    </div>
+                    
+                    <div id="preview-loading" style="display: none;" class="py-5">
+                        <div class="spinner-border text-primary mb-3" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="text-muted">Generating preview...</p>
+                    </div>
+                    
+                    <div id="preview-image-container" style="display: none;">
+                        <img id="preview-image" class="img-fluid rounded border" alt="ROI Preview">
                     </div>
                 </div>
             </div>
@@ -96,120 +137,71 @@
     </div>
 </div>
 
-<!-- Existing Parking Spaces -->
-<div class="row">
+<!-- Current Configuration -->
+<div class="row mb-4">
     <div class="col-12">
         <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
+            <div class="card-header">
                 <h5 class="card-title mb-0">
-                    <i class="bi bi-list me-2"></i>
-                    Existing Parking Spaces
+                    <i class="bi bi-list-ul me-2"></i>
+                    Current ROI Configuration
                 </h5>
-                <span class="badge bg-primary">{{ spaces|length }} spaces</span>
             </div>
             <div class="card-body">
-                {% if spaces %}
-                    <div class="table-responsive">
-                        <table class="table table-hover">
-                            <thead>
-                                <tr>
-                                    <th>Name</th>
-                                    <th>Coordinates</th>
-                                    <th>Status</th>
-                                    <th>Created</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for space in spaces %}
-                                <tr id="space-row-{{ space.id }}">
-                                    <td>
-                                        <strong>{{ space.name }}</strong>
-                                    </td>
-                                    <td>
-                                        <small class="text-muted">
-                                            ({{ space.x1 }}, {{ space.y1 }}) - ({{ space.x2 }}, {{ space.y2 }})
-                                        </small>
-                                    </td>
-                                    <td>
-                                        {% if space.is_occupied %}
-                                            <span class="badge bg-danger">
-                                                <i class="bi bi-car-front me-1"></i>Occupied
-                                            </span>
-                                        {% else %}
-                                            <span class="badge bg-success">
-                                                <i class="bi bi-check-circle me-1"></i>Available
-                                            </span>
-                                        {% endif %}
-                                    </td>
-                                    <td>
-                                        <small class="text-muted">
-                                            {{ space.created_at.strftime('%Y-%m-%d %H:%M') }}
-                                        </small>
-                                    </td>
-                                    <td>
-                                        <div class="btn-group btn-group-sm" role="group">
-                                            <button type="button" 
-                                                    class="btn btn-outline-primary highlight-space-btn"
-                                                    data-space-id="{{ space.id }}"
-                                                    data-x1="{{ space.x1 }}"
-                                                    data-y1="{{ space.y1 }}"
-                                                    data-x2="{{ space.x2 }}"
-                                                    data-y2="{{ space.y2 }}"
-                                                    title="Highlight on canvas">
-                                                <i class="bi bi-eye"></i>
-                                            </button>
-                                            <button type="button" 
-                                                    class="btn btn-outline-danger delete-space-btn"
-                                                    data-space-id="{{ space.id }}"
-                                                    data-space-name="{{ space.name }}"
-                                                    title="Delete space">
-                                                <i class="bi bi-trash"></i>
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                {% else %}
-                    <div class="text-center text-muted py-5">
-                        <i class="bi bi-grid-3x3" style="font-size: 4rem;"></i>
-                        <h4 class="mt-3">No Parking Spaces Defined</h4>
-                        <p class="mb-0">Use the canvas above to define your first parking space</p>
-                    </div>
-                {% endif %}
+                <div id="config-list">
+                    {% if roi_config %}
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Type</th>
+                                        <th>Name</th>
+                                        <th>Points</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for roi in roi_config %}
+                                    <tr>
+                                        <td>
+                                            {% if roi.type == 'line' %}
+                                                <span class="badge bg-warning">
+                                                    <i class="bi bi-dash-lg me-1"></i>Line
+                                                </span>
+                                            {% elif roi.type == 'rectangle' %}
+                                                <span class="badge bg-success">
+                                                    <i class="bi bi-square me-1"></i>Rectangle
+                                                </span>
+                                            {% elif roi.type == 'polyline' %}
+                                                <span class="badge bg-info">
+                                                    <i class="bi bi-pentagon me-1"></i>Polyline
+                                                </span>
+                                            {% endif %}
+                                        </td>
+                                        <td><strong>{{ roi.name }}</strong></td>
+                                        <td>
+                                            <small class="text-muted">{{ roi.points|length }} points</small>
+                                        </td>
+                                        <td>
+                                            <span class="badge bg-primary">Active</span>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <div class="text-center text-muted py-4">
+                            <i class="bi bi-inbox" style="font-size: 3rem;"></i>
+                            <p class="mt-2">No ROI configuration loaded</p>
+                        </div>
+                    {% endif %}
+                </div>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Delete Confirmation Modal -->
-<div class="modal fade" id="deleteModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">
-                    <i class="bi bi-exclamation-triangle me-2"></i>
-                    Confirm Deletion
-                </h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <p>Are you sure you want to delete parking space <strong id="delete-space-name"></strong>?</p>
-                <p class="text-muted small">This action cannot be undone. Any associated parking sessions will remain in the database.</p>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-danger" id="confirm-delete-btn">
-                    <i class="bi bi-trash me-2"></i>
-                    Delete Space
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
 {% endblock %}
 
 {% block scripts %}
