@@ -22,19 +22,27 @@ class ReportService:
             days (int): Number of days to look back (default: 7)
             
         Returns:
-            list: List of tuples (date, revenue)
+            list: List of dictionaries with 'date' and 'revenue' keys
         """
         try:
             end_date = datetime.utcnow()
             start_date = end_date - timedelta(days=days)
             
-            daily_revenue = db.session.query(
+            results = db.session.query(
                 func.date(ParkingSession.exit_time).label('date'),
                 func.sum(ParkingSession.toll_amount).label('revenue')
             ).filter(
                 ParkingSession.exit_time.between(start_date, end_date),
                 ParkingSession.is_active == False
             ).group_by(func.date(ParkingSession.exit_time)).all()
+            
+            # Convert to list of dictionaries for easier template access
+            daily_revenue = []
+            for row in results:
+                daily_revenue.append({
+                    'date': row.date,
+                    'revenue': float(row.revenue) if row.revenue else 0.0
+                })
             
             return daily_revenue
             
@@ -50,19 +58,27 @@ class ReportService:
             date (datetime.date, optional): Date to get occupancy for (default: today)
             
         Returns:
-            list: List of tuples (hour, count)
+            list: List of dictionaries with 'hour' and 'count' keys
         """
         try:
             if date is None:
                 date = datetime.utcnow().date()
             
-            hourly_occupancy = db.session.query(
+            results = db.session.query(
                 func.extract('hour', DetectionLog.timestamp).label('hour'),
                 func.count(DetectionLog.id).label('count')
             ).filter(
                 func.date(DetectionLog.timestamp) == date,
                 DetectionLog.detection_type == 'entry'
             ).group_by(func.extract('hour', DetectionLog.timestamp)).all()
+            
+            # Convert to list of dictionaries for easier template access
+            hourly_occupancy = []
+            for row in results:
+                hourly_occupancy.append({
+                    'hour': int(row.hour) if row.hour else 0,
+                    'count': int(row.count) if row.count else 0
+                })
             
             return hourly_occupancy
             
@@ -78,16 +94,25 @@ class ReportService:
             limit (int): Maximum number of vehicles to return
             
         Returns:
-            list: List of tuples (license_plate, total_visits, total_paid)
+            list: List of dictionaries with vehicle information
         """
         try:
-            top_vehicles = db.session.query(
+            results = db.session.query(
                 Vehicle.license_plate,
                 Vehicle.total_visits,
                 func.sum(ParkingSession.toll_amount).label('total_paid')
             ).join(ParkingSession).filter(
                 ParkingSession.is_active == False
             ).group_by(Vehicle.id).order_by(desc(Vehicle.total_visits)).limit(limit).all()
+            
+            # Convert to list of dictionaries for easier template access
+            top_vehicles = []
+            for row in results:
+                top_vehicles.append({
+                    'license_plate': row.license_plate,
+                    'total_visits': row.total_visits,
+                    'total_paid': float(row.total_paid) if row.total_paid else 0.0
+                })
             
             return top_vehicles
             

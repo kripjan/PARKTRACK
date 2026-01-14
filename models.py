@@ -1,5 +1,5 @@
 from datetime import datetime
-from app import db  # ✅ Import db from app.py instead of creating a new one
+from app import db
 from sqlalchemy import func
 
 class Vehicle(db.Model):
@@ -47,16 +47,16 @@ class ParkingSession(db.Model):
     is_active = db.Column(db.Boolean, default=True)
     
     def calculate_toll(self):
-        """Calculate toll based on parking duration"""
+        """Calculate toll based on parking duration in Nepali Rupees (NPR)"""
         if self.exit_time and self.entry_time:
             duration = self.exit_time - self.entry_time
             self.duration_minutes = int(duration.total_seconds() / 60)
             
             if self.duration_minutes <= 60:
-                self.toll_amount = 2.0
+                self.toll_amount = 50.0  # Rs. 50 for first hour
             else:
                 additional_hours = (self.duration_minutes - 60) // 60 + (1 if (self.duration_minutes - 60) % 60 > 0 else 0)
-                self.toll_amount = 2.0 + (additional_hours * 1.0)
+                self.toll_amount = 50.0 + (additional_hours * 30.0)  # Rs. 30 per additional hour
         
         return self.toll_amount
     

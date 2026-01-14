@@ -243,7 +243,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const container = document.getElementById(containerId);
         container.innerHTML = `
             <div class="alert alert-${type} alert-dismissible fade show" role="alert">
-                ${message}
+                Rs{message}
                 <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             </div>
         `;
@@ -266,7 +266,7 @@ document.addEventListener('DOMContentLoaded', function() {
         toast.innerHTML = `
             <div class="d-flex">
                 <div class="toast-body text-white">
-                    ${message}
+                    Rs{message}
                 </div>
                 <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
             </div>

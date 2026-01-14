@@ -21,11 +21,11 @@
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
                         <h3 class="card-title text-white mb-1" id="total-revenue">
-                            ${{ daily_revenue | sum(attribute='revenue') | default(0) | round(2) }}
+                            Rs. {% set total = 0 %}{% for item in daily_revenue %}{% set total = total + item['revenue'] %}{% endfor %}{{ "%.2f"|format(total) }}
                         </h3>
                         <p class="card-text text-white-50 mb-0">7-Day Revenue</p>
                     </div>
-                    <i class="bi bi-currency-dollar text-white" style="font-size: 2rem;"></i>
+                    <i class="bi bi-currency-rupee text-white" style="font-size: 2rem;"></i>
                 </div>
             </div>
         </div>
@@ -51,7 +51,7 @@
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
                         <h3 class="card-title text-white mb-1">
-                            {{ (daily_revenue | sum(attribute='revenue') / 7) | round(2) if daily_revenue else 0 }}
+                            Rs. {% if daily_revenue|length > 0 %}{% set total = 0 %}{% for item in daily_revenue %}{% set total = total + item['revenue'] %}{% endfor %}{{ "%.2f"|format(total / daily_revenue|length) }}{% else %}0.00{% endif %}
                         </h3>
                         <p class="card-text text-white-50 mb-0">Avg Daily Revenue</p>
                     </div>
@@ -67,7 +67,7 @@
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
                         <h3 class="card-title text-dark mb-1">
-                            {{ hourly_occupancy | sum(attribute='count') }}
+                            {% set total_count = 0 %}{% for item in hourly_occupancy %}{% set total_count = total_count + item['count'] %}{% endfor %}{{ total_count }}
                         </h3>
                         <p class="card-text text-dark mb-0">Today's Entries</p>
                     </div>
@@ -138,23 +138,23 @@
                                 <tr>
                                     <td>{{ loop.index }}</td>
                                     <td>
-                                        <strong>{{ vehicle.license_plate }}</strong>
+                                        <strong>{{ vehicle["license_plate"] }}</strong>
                                     </td>
                                     <td>
-                                        <span class="badge bg-primary">{{ vehicle.total_visits }}</span>
+                                        <span class="badge bg-primary">{{ vehicle["total_visits"] }}</span>
                                     </td>
                                     <td>
-                                        <strong>${{ "%.2f"|format(vehicle.total_paid or 0) }}</strong>
+                                        <strong>Rs. {{ "%.2f"|format(vehicle["total_paid"]) }}</strong>
                                     </td>
                                     <td>
-                                        ${{ "%.2f"|format((vehicle.total_paid or 0) / vehicle.total_visits) }}
+                                        Rs. {{ "%.2f"|format(vehicle["total_paid"] / vehicle["total_visits"]) }}
                                     </td>
                                     <td>
-                                        {% if vehicle.total_visits >= 20 %}
+                                        {% if vehicle["total_visits"] >= 20 %}
                                             <span class="badge bg-warning text-dark">
                                                 <i class="bi bi-star-fill me-1"></i>Premium
                                             </span>
-                                        {% elif vehicle.total_visits >= 10 %}
+                                        {% elif vehicle["total_visits"] >= 10 %}
                                             <span class="badge bg-info">
                                                 <i class="bi bi-bookmark-fill me-1"></i>Regular
                                             </span>
@@ -235,21 +235,40 @@
 {% endblock %}
 
 {% block scripts %}
+<script id="report-data" type="application/json">
+{
+    "daily_revenue": [
+        {% for item in daily_revenue %}
+        {
+            "date": "{{ item['date'].strftime('%m/%d') }}",
+            "revenue": {{ item['revenue'] }}
+        }{% if not loop.last %},{% endif %}
+        {% endfor %}
+    ],
+    "hourly_occupancy": [
+        {% for item in hourly_occupancy %}
+        {
+            "hour": {{ item['hour'] }},
+            "count": {{ item['count'] }}
+        }{% if not loop.last %},{% endif %}
+        {% endfor %}
+    ]
+}
+</script>
+
 <script>
+    // Parse data from JSON script tag
+    const reportData = JSON.parse(document.getElementById('report-data').textContent);
+    
     // Revenue Chart Data
+    const revenueLabels = reportData.daily_revenue.map(item => item.date);
+    const revenueValues = reportData.daily_revenue.map(item => item.revenue);
+
     const revenueData = {
-        labels: [
-            {% for item in daily_revenue %}
-                '{{ item.date.strftime("%m/%d") }}'{{ "," if not loop.last }}
-            {% endfor %}
-        ],
+        labels: revenueLabels,
         datasets: [{
-            label: 'Daily Revenue',
-            data: [
-                {% for item in daily_revenue %}
-                    {{ item.revenue or 0 }}{{ "," if not loop.last }}
-                {% endfor %}
-            ],
+            label: 'Daily Revenue (NPR)',
+            data: revenueValues,
             backgroundColor: 'rgba(13, 110, 253, 0.8)',
             borderColor: 'rgba(13, 110, 253, 1)',
             borderWidth: 2
@@ -257,19 +276,16 @@
     };
 
     // Hourly Occupancy Data
+    const occupancyLabels = reportData.hourly_occupancy.map(item => 
+        item.hour.toString().padStart(2, '0') + ':00'
+    );
+    const occupancyCounts = reportData.hourly_occupancy.map(item => item.count);
+
     const occupancyData = {
-        labels: [
-            {% for item in hourly_occupancy %}
-                '{{ "%02d"|format(item.hour|int) }}:00'{{ "," if not loop.last }}
-            {% endfor %}
-        ],
+        labels: occupancyLabels,
         datasets: [{
             label: 'Vehicle Entries',
-            data: [
-                {% for item in hourly_occupancy %}
-                    {{ item.count }}{{ "," if not loop.last }}
-                {% endfor %}
-            ],
+            data: occupancyCounts,
             backgroundColor: 'rgba(25, 135, 84, 0.8)',
             borderColor: 'rgba(25, 135, 84, 1)',
             borderWidth: 2
@@ -279,63 +295,80 @@
     // Initialize Charts
     document.addEventListener('DOMContentLoaded', function() {
         // Revenue Chart
-        const revenueCtx = document.getElementById('revenueChart').getContext('2d');
-        new Chart(revenueCtx, {
-            type: 'bar',
-            data: revenueData,
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        display: false
-                    }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        ticks: {
-                            callback: function(value) {
-                                return '$' + value.toFixed(2);
+        const revenueCtx = document.getElementById('revenueChart');
+        if (revenueCtx) {
+            new Chart(revenueCtx.getContext('2d'), {
+                type: 'bar',
+                data: revenueData,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return 'Rs. ' + context.parsed.y.toFixed(2);
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function(value) {
+                                    return 'Rs. ' + value.toFixed(2);
+                                }
                             }
                         }
                     }
                 }
-            }
-        });
+            });
+        }
 
         // Occupancy Chart
-        const occupancyCtx = document.getElementById('occupancyChart').getContext('2d');
-        new Chart(occupancyCtx, {
-            type: 'line',
-            data: occupancyData,
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        display: false
-                    }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true
-                    }
-                },
-                elements: {
-                    point: {
-                        radius: 4,
-                        hoverRadius: 6
+        const occupancyCtx = document.getElementById('occupancyChart');
+        if (occupancyCtx) {
+            new Chart(occupancyCtx.getContext('2d'), {
+                type: 'line',
+                data: occupancyData,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                stepSize: 1
+                            }
+                        }
+                    },
+                    elements: {
+                        point: {
+                            radius: 4,
+                            hoverRadius: 6
+                        }
                     }
                 }
-            }
-        });
+            });
+        }
     });
 
     // Export Functions
     function exportReport(type) {
         // In a real implementation, this would trigger a server-side export
         alert(`Exporting ${type} report... (Feature to be implemented)`);
+        
+        // Example implementation for future use:
+        // window.location.href = `/api/export/${type}`;
     }
 </script>
 {% endblock %}

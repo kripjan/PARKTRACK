@@ -121,13 +121,13 @@ class DashboardService:
             entry_time (datetime): Session entry time
             
         Returns:
-            float: Estimated cost
+            float: Estimated cost in NPR
         """
         duration = DashboardService.calculate_session_duration(entry_time)
         total_minutes = duration['total_minutes']
         
         if total_minutes <= 60:
-            return 2.0
+            return 50.0  # Rs. 50 for first hour
         else:
             additional_hours = ((total_minutes - 60) // 60) + (1 if (total_minutes - 60) % 60 > 0 else 0)
-            return 2.0 + (additional_hours * 1.0)
+            return 50.0 + (additional_hours * 30.0)  # Rs. 30 per additional hour
