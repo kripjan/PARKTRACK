@@ -2,17 +2,20 @@
 Routes module - handles HTTP routing with minimal logic
 Business logic is delegated to service classes
 """
-from flask import render_template, request, redirect, url_for, flash, jsonify
+import os
+import json
+from flask import render_template, request, redirect, url_for, flash, jsonify, send_from_directory
 from flask_socketio import emit
+from werkzeug.utils import secure_filename
 from app import app, socketio
-from services import DashboardService, ParkingSpaceService, VideoService, ReportService
+from services import DashboardService, VideoService, ReportService, ParkingSpaceService
 from parking_manager import ParkingManager
 
 # Initialize services
 dashboard_service = DashboardService()
-parking_space_service = ParkingSpaceService()
 video_service = VideoService()
 report_service = ReportService()
+parking_space_service = ParkingSpaceService(app.config['UPLOAD_FOLDER'])
 parking_manager = ParkingManager()
 
 
@@ -93,49 +96,123 @@ def stop_live_feed():
 
 
 # ============================================================================
-# PARKING SPACE ROUTES
+# ROI CONFIGURATION ROUTES
 # ============================================================================
 
 @app.route('/parking_spaces')
 def parking_spaces():
-    """Parking space management page"""
-    spaces = parking_space_service.get_all_spaces()
-    return render_template('parking_spaces.html', spaces=spaces)
+    """ROI Configuration visualizer page"""
+    roi_config = parking_space_service.load_config()
+    return render_template('parking_spaces.html', roi_config=roi_config)
 
 
-@app.route('/add_parking_space', methods=['POST'])
-def add_parking_space():
-    """Add a new parking space"""
-    data = request.get_json()
-    
+@app.route('/upload_roi_config', methods=['POST'])
+def upload_roi_config():
+    """Upload and save ROI configuration JSON"""
     try:
-        success, message, space = parking_space_service.create_space(
-            name=data['name'],
-            x1=data['x1'],
-            y1=data['y1'],
-            x2=data['x2'],
-            y2=data['y2']
-        )
+        if 'config_file' not in request.files:
+            return jsonify({'success': False, 'message': 'No file uploaded'}), 400
+        
+        file = request.files['config_file']
+        
+        if file.filename == '':
+            return jsonify({'success': False, 'message': 'No file selected'}), 400
+        
+        # Process upload
+        success, message, config = parking_space_service.upload_config_file(file)
         
         if success:
             return jsonify({
                 'success': True,
                 'message': message,
-                'space_id': space.id if space else None
+                'roi_count': len(config) if config else 0
             })
         else:
             return jsonify({'success': False, 'message': message}), 400
             
-    except KeyError as e:
-        return jsonify({'success': False, 'message': f'Missing required field: {e}'}), 400
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 400
+        return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500
 
 
-@app.route('/delete_parking_space/<int:space_id>', methods=['DELETE'])
-def delete_parking_space(space_id):
-    """Delete a parking space"""
-    success, message = parking_space_service.delete_space(space_id)
+@app.route('/upload_cctv_frame', methods=['POST'])
+def upload_cctv_frame():
+    """Upload CCTV frame image"""
+    try:
+        if 'frame_file' not in request.files:
+            return jsonify({'success': False, 'message': 'No file uploaded'}), 400
+        
+        file = request.files['frame_file']
+        
+        if file.filename == '':
+            return jsonify({'success': False, 'message': 'No file selected'}), 400
+        
+        # Process upload
+        success, message, filepath = parking_space_service.upload_frame(file)
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': message,
+                'frame_path': os.path.basename(filepath) if filepath else None
+            })
+        else:
+            return jsonify({'success': False, 'message': message}), 400
+            
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500
+
+
+@app.route('/generate_roi_preview', methods=['POST'])
+def generate_roi_preview():
+    """Generate preview image with ROI overlays"""
+    try:
+        # Generate preview
+        success, message, preview_path = parking_space_service.generate_preview()
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': message,
+                'preview_url': url_for('get_roi_preview')
+            })
+        else:
+            return jsonify({'success': False, 'message': message}), 400
+            
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500
+
+
+@app.route('/roi_preview')
+def get_roi_preview():
+    """Serve the ROI preview image"""
+    preview_file = os.path.join(app.config['UPLOAD_FOLDER'], 'roi_preview.jpg')
+    if os.path.exists(preview_file):
+        return send_from_directory(app.config['UPLOAD_FOLDER'], 'roi_preview.jpg')
+    else:
+        return jsonify({'error': 'Preview not found'}), 404
+
+
+@app.route('/cctv_frame')
+def get_cctv_frame():
+    """Serve the uploaded CCTV frame"""
+    frame_file = os.path.join(app.config['UPLOAD_FOLDER'], 'cctv_frame.jpg')
+    if os.path.exists(frame_file):
+        return send_from_directory(app.config['UPLOAD_FOLDER'], 'cctv_frame.jpg')
+    else:
+        return jsonify({'error': 'Frame not found'}), 404
+
+
+@app.route('/api/roi_summary')
+def api_roi_summary():
+    """API endpoint for ROI configuration summary"""
+    summary = parking_space_service.get_config_summary()
+    return jsonify(summary)
+
+
+@app.route('/delete_roi_config', methods=['DELETE'])
+def delete_roi_config():
+    """Delete ROI configuration and associated files"""
+    success, message = parking_space_service.delete_config()
     
     if success:
         return jsonify({'success': True, 'message': message})
@@ -143,22 +220,17 @@ def delete_parking_space(space_id):
         return jsonify({'success': False, 'message': message}), 400
 
 
-@app.route('/update_parking_space/<int:space_id>', methods=['PUT'])
-def update_parking_space(space_id):
-    """Update a parking space"""
-    data = request.get_json()
-    
-    success, message, space = parking_space_service.update_space(
-        space_id=space_id,
-        name=data.get('name'),
-        x1=data.get('x1'),
-        y1=data.get('y1'),
-        x2=data.get('x2'),
-        y2=data.get('y2')
-    )
+@app.route('/export_roi_config')
+def export_roi_config():
+    """Export ROI configuration as JSON"""
+    success, config_json, message = parking_space_service.export_config()
     
     if success:
-        return jsonify({'success': True, 'message': message})
+        return jsonify({
+            'success': True,
+            'config': json.loads(config_json),
+            'message': message
+        })
     else:
         return jsonify({'success': False, 'message': message}), 400
 

@@ -2,8 +2,8 @@
 document.addEventListener('DOMContentLoaded', function() {
     const configUploadForm = document.getElementById('config-upload-form');
     const frameUploadForm = document.getElementById('frame-upload-form');
-    const configFile = document.getElementById('config-file');
-    const frameFile = document.getElementById('frame-file');
+    const configFileInput = document.getElementById('config-file');
+    const frameFileInput = document.getElementById('frame-file');
     const generatePreviewBtn = document.getElementById('generate-preview-btn');
     const framePreview = document.getElementById('frame-preview');
     const framePreviewContainer = document.getElementById('frame-preview-container');
@@ -11,41 +11,16 @@ document.addEventListener('DOMContentLoaded', function() {
     let configUploaded = false;
     let frameUploaded = false;
     
-    // Configuration file upload
-    configUploadForm.addEventListener('submit', async function(e) {
+    // Config file upload handler
+    configUploadForm.addEventListener('submit', function(e) {
         e.preventDefault();
         
-        const file = configFile.files[0];
+        const file = configFileInput.files[0];
         if (!file) {
-            showAlert('config-status', 'Please select a configuration file', 'danger');
+            showAlert('Please select a configuration file', 'warning');
             return;
         }
         
-        // Validate JSON before uploading
-        try {
-            const text = await file.text();
-            const json = JSON.parse(text);
-            
-            // Validate structure
-            if (!Array.isArray(json)) {
-                throw new Error('Configuration must be an array');
-            }
-            
-            for (const roi of json) {
-                if (!roi.type || !roi.name || !roi.points) {
-                    throw new Error('Each ROI must have type, name, and points');
-                }
-                if (!Array.isArray(roi.points)) {
-                    throw new Error('Points must be an array');
-                }
-            }
-            
-        } catch (error) {
-            showAlert('config-status', `Invalid JSON: ${error.message}`, 'danger');
-            return;
-        }
-        
-        // Upload configuration
         const formData = new FormData();
         formData.append('config_file', file);
         
@@ -53,48 +28,44 @@ document.addEventListener('DOMContentLoaded', function() {
         uploadBtn.disabled = true;
         uploadBtn.innerHTML = '<i class="bi bi-hourglass me-2"></i>Uploading...';
         
-        try {
-            const response = await fetch('/upload_roi_config', {
-                method: 'POST',
-                body: formData
-            });
-            
-            const result = await response.json();
-            
-            if (result.success) {
-                showAlert('config-status', 
-                    `Configuration uploaded successfully! ${result.roi_count} ROIs loaded.`, 
-                    'success');
+        fetch('/upload_roi_config', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showAlert(data.message, 'success');
                 configUploaded = true;
-                updateGenerateButton();
+                updateConfigStatus(data);
+                checkPreviewReady();
                 
-                // Reload configuration list
-                setTimeout(() => {
-                    window.location.reload();
-                }, 1500);
+                // Reload page to show config in table
+                setTimeout(() => window.location.reload(), 1500);
             } else {
-                showAlert('config-status', `Error: ${result.message}`, 'danger');
+                showAlert(data.message, 'danger');
             }
-            
-        } catch (error) {
-            showAlert('config-status', `Upload failed: ${error.message}`, 'danger');
-        } finally {
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showAlert('Error uploading configuration file', 'danger');
+        })
+        .finally(() => {
             uploadBtn.disabled = false;
             uploadBtn.innerHTML = '<i class="bi bi-upload me-2"></i>Upload Configuration';
-        }
+        });
     });
     
-    // Frame file upload
-    frameUploadForm.addEventListener('submit', async function(e) {
+    // Frame file upload handler
+    frameUploadForm.addEventListener('submit', function(e) {
         e.preventDefault();
         
-        const file = frameFile.files[0];
+        const file = frameFileInput.files[0];
         if (!file) {
-            showAlert('frame-status', 'Please select a frame image', 'danger');
+            showAlert('Please select a frame image', 'warning');
             return;
         }
         
-        // Upload frame
         const formData = new FormData();
         formData.append('frame_file', file);
         
@@ -102,214 +73,230 @@ document.addEventListener('DOMContentLoaded', function() {
         uploadBtn.disabled = true;
         uploadBtn.innerHTML = '<i class="bi bi-hourglass me-2"></i>Uploading...';
         
-        try {
-            const response = await fetch('/upload_cctv_frame', {
-                method: 'POST',
-                body: formData
-            });
-            
-            const result = await response.json();
-            
-            if (result.success) {
-                showAlert('frame-status', 'Frame uploaded successfully!', 'success');
+        fetch('/upload_cctv_frame', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showAlert(data.message, 'success');
                 frameUploaded = true;
-                updateGenerateButton();
+                updateFrameStatus(data);
+                checkPreviewReady();
             } else {
-                showAlert('frame-status', `Error: ${result.message}`, 'danger');
+                showAlert(data.message, 'danger');
             }
-            
-        } catch (error) {
-            showAlert('frame-status', `Upload failed: ${error.message}`, 'danger');
-        } finally {
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showAlert('Error uploading frame image', 'danger');
+        })
+        .finally(() => {
             uploadBtn.disabled = false;
             uploadBtn.innerHTML = '<i class="bi bi-upload me-2"></i>Upload Frame';
-        }
+        });
     });
     
     // Frame file preview
-    frameFile.addEventListener('change', function(e) {
+    frameFileInput.addEventListener('change', function(e) {
         const file = e.target.files[0];
         if (file) {
             const reader = new FileReader();
+            
             reader.onload = function(e) {
                 framePreview.src = e.target.result;
                 framePreviewContainer.style.display = 'block';
             };
+            
             reader.readAsDataURL(file);
         }
     });
     
-    // Config file info
-    configFile.addEventListener('change', async function(e) {
-        const file = e.target.files[0];
-        if (file) {
-            try {
-                const text = await file.text();
-                const json = JSON.parse(text);
-                
-                const roiCount = json.length;
-                const types = {};
-                
-                json.forEach(roi => {
-                    types[roi.type] = (types[roi.type] || 0) + 1;
-                });
-                
-                const typesSummary = Object.entries(types)
-                    .map(([type, count]) => `${count} ${type}${count > 1 ? 's' : ''}`)
-                    .join(', ');
-                
-                showAlert('config-status', 
-                    `File loaded: ${roiCount} ROI${roiCount > 1 ? 's' : ''} (${typesSummary})`, 
-                    'info');
-                
-            } catch (error) {
-                showAlert('config-status', `Invalid JSON file: ${error.message}`, 'warning');
-            }
-        }
-    });
-    
-    // Generate preview button
-    generatePreviewBtn.addEventListener('click', async function() {
-        const noPreview = document.getElementById('no-preview');
-        const previewLoading = document.getElementById('preview-loading');
-        const previewImageContainer = document.getElementById('preview-image-container');
-        const previewImage = document.getElementById('preview-image');
-        
-        // Show loading
-        noPreview.style.display = 'none';
-        previewImageContainer.style.display = 'none';
-        previewLoading.style.display = 'block';
-        
+    // Generate preview button handler
+    generatePreviewBtn.addEventListener('click', function() {
         generatePreviewBtn.disabled = true;
+        generatePreviewBtn.innerHTML = '<i class="bi bi-hourglass me-2"></i>Generating...';
         
-        try {
-            const response = await fetch('/generate_preview');
-            const result = await response.json();
-            
-            if (result.success) {
-                // Load preview image
-                previewImage.src = result.preview_url + '?t=' + new Date().getTime();
-                previewImageContainer.style.display = 'block';
-                previewLoading.style.display = 'none';
+        // Show loading state
+        document.getElementById('no-preview').style.display = 'none';
+        document.getElementById('preview-loading').style.display = 'block';
+        document.getElementById('preview-image-container').style.display = 'none';
+        
+        fetch('/generate_roi_preview', {
+            method: 'POST'
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showAlert(data.message, 'success');
                 
-                // Show success message
-                showToast('Preview generated successfully!', 'success');
+                // Display preview image
+                const previewImage = document.getElementById('preview-image');
+                previewImage.src = data.preview_url + '?t=' + new Date().getTime(); // Cache bust
+                
+                document.getElementById('preview-loading').style.display = 'none';
+                document.getElementById('preview-image-container').style.display = 'block';
             } else {
-                throw new Error(result.message);
+                showAlert(data.message, 'danger');
+                document.getElementById('preview-loading').style.display = 'none';
+                document.getElementById('no-preview').style.display = 'block';
             }
-            
-        } catch (error) {
-            previewLoading.style.display = 'none';
-            noPreview.style.display = 'block';
-            showToast(`Failed to generate preview: ${error.message}`, 'danger');
-        } finally {
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showAlert('Error generating preview', 'danger');
+            document.getElementById('preview-loading').style.display = 'none';
+            document.getElementById('no-preview').style.display = 'block';
+        })
+        .finally(() => {
             generatePreviewBtn.disabled = false;
-        }
+            generatePreviewBtn.innerHTML = '<i class="bi bi-arrow-repeat me-2"></i>Generate Preview';
+        });
     });
     
-    // Update generate button state
-    function updateGenerateButton() {
-        if (configUploaded && frameUploaded) {
-            generatePreviewBtn.disabled = false;
-        }
+    // Check if both files are uploaded to enable preview button
+    function checkPreviewReady() {
+        // Check via API
+        fetch('/api/roi_summary')
+            .then(response => response.json())
+            .then(data => {
+                if (data.exists && data.frame_uploaded) {
+                    generatePreviewBtn.disabled = false;
+                    
+                    // Auto-generate preview if both are available
+                    if (configUploaded || frameUploaded) {
+                        generatePreviewBtn.click();
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Error checking ROI status:', error);
+            });
     }
     
-    // Check if both files are already uploaded
-    checkExistingFiles();
-    
-    async function checkExistingFiles() {
-        try {
-            const response = await fetch('/get_roi_config');
-            const result = await response.json();
-            
-            if (result.success) {
-                configUploaded = true;
-                updateGenerateButton();
-            }
-        } catch (error) {
-            console.log('No existing configuration');
-        }
-        
-        // Check for existing frame (this would need additional backend support)
-        // For now, assume if config exists, frame might exist too
-        if (configUploaded) {
-            frameUploaded = true;
-            updateGenerateButton();
-        }
-    }
-    
-    // Helper functions
-    function showAlert(containerId, message, type) {
-        const container = document.getElementById(containerId);
-        container.innerHTML = `
-            <div class="alert alert-${type} alert-dismissible fade show" role="alert">
-                Rs{message}
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    function updateConfigStatus(data) {
+        const statusDiv = document.getElementById('config-status');
+        statusDiv.innerHTML = `
+            <div class="alert alert-success">
+                <i class="bi bi-check-circle me-2"></i>
+                Configuration uploaded: ${data.roi_count} ROI entries
             </div>
         `;
+    }
+    
+    function updateFrameStatus(data) {
+        const statusDiv = document.getElementById('frame-status');
+        statusDiv.innerHTML = `
+            <div class="alert alert-success">
+                <i class="bi bi-check-circle me-2"></i>
+                Frame uploaded successfully
+            </div>
+        `;
+    }
+    
+    function showAlert(message, type) {
+        const alertDiv = document.createElement('div');
+        alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
+        alertDiv.innerHTML = `
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        `;
         
-        // Auto-dismiss after 5 seconds
+        // Insert at the top of the container
+        const container = document.querySelector('.container');
+        const firstRow = container.querySelector('.row');
+        container.insertBefore(alertDiv, firstRow);
+        
+        // Auto-remove after 5 seconds
         setTimeout(() => {
-            const alert = container.querySelector('.alert');
-            if (alert) {
-                alert.remove();
+            if (alertDiv.parentNode) {
+                alertDiv.remove();
             }
         }, 5000);
     }
     
-    function showToast(message, type) {
-        const toast = document.createElement('div');
-        toast.className = `toast align-items-center border-0 position-fixed top-0 end-0 m-3 bg-${type}`;
-        toast.setAttribute('role', 'alert');
-        toast.style.zIndex = '9999';
-        
-        toast.innerHTML = `
-            <div class="d-flex">
-                <div class="toast-body text-white">
-                    Rs{message}
-                </div>
-                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
-            </div>
-        `;
-        
-        document.body.appendChild(toast);
-        
-        const bsToast = new bootstrap.Toast(toast, { delay: 5000 });
-        bsToast.show();
-        
-        toast.addEventListener('hidden.bs.toast', () => {
-            document.body.removeChild(toast);
-        });
+    // Load existing preview if available
+    function loadExistingPreview() {
+        fetch('/api/roi_summary')
+            .then(response => response.json())
+            .then(data => {
+                if (data.preview_available) {
+                    const previewImage = document.getElementById('preview-image');
+                    previewImage.src = '/roi_preview?t=' + new Date().getTime();
+                    
+                    document.getElementById('no-preview').style.display = 'none';
+                    document.getElementById('preview-image-container').style.display = 'block';
+                }
+                
+                if (data.exists && data.frame_uploaded) {
+                    generatePreviewBtn.disabled = false;
+                }
+            })
+            .catch(error => {
+                console.error('Error loading preview:', error);
+            });
     }
     
     // Drag and drop for config file
-    setupDragAndDrop('config-upload-form', configFile);
+    const configCard = document.querySelector('#config-upload-form').closest('.card-body');
+    
+    configCard.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        configCard.classList.add('bg-light');
+    });
+    
+    configCard.addEventListener('dragleave', function(e) {
+        e.preventDefault();
+        configCard.classList.remove('bg-light');
+    });
+    
+    configCard.addEventListener('drop', function(e) {
+        e.preventDefault();
+        configCard.classList.remove('bg-light');
+        
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            const file = files[0];
+            if (file.name.endsWith('.json') || file.name.endsWith('.txt')) {
+                configFileInput.files = files;
+            } else {
+                showAlert('Please drop a JSON or TXT file', 'warning');
+            }
+        }
+    });
     
     // Drag and drop for frame file
-    setupDragAndDrop('frame-upload-form', frameFile);
+    const frameCard = document.querySelector('#frame-upload-form').closest('.card-body');
     
-    function setupDragAndDrop(formId, inputElement) {
-        const form = document.getElementById(formId);
+    frameCard.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        frameCard.classList.add('bg-light');
+    });
+    
+    frameCard.addEventListener('dragleave', function(e) {
+        e.preventDefault();
+        frameCard.classList.remove('bg-light');
+    });
+    
+    frameCard.addEventListener('drop', function(e) {
+        e.preventDefault();
+        frameCard.classList.remove('bg-light');
         
-        form.addEventListener('dragover', function(e) {
-            e.preventDefault();
-            form.classList.add('border-primary');
-        });
-        
-        form.addEventListener('dragleave', function(e) {
-            e.preventDefault();
-            form.classList.remove('border-primary');
-        });
-        
-        form.addEventListener('drop', function(e) {
-            e.preventDefault();
-            form.classList.remove('border-primary');
-            
-            const files = e.dataTransfer.files;
-            if (files.length > 0) {
-                inputElement.files = files;
-                inputElement.dispatchEvent(new Event('change'));
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            const file = files[0];
+            const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/bmp'];
+            if (validTypes.includes(file.type)) {
+                frameFileInput.files = files;
+                frameFileInput.dispatchEvent(new Event('change'));
+            } else {
+                showAlert('Please drop a valid image file (JPG, PNG, BMP)', 'warning');
             }
-        });
-    }
+        }
+    });
+    
+    // Initialize
+    loadExistingPreview();
+    checkPreviewReady();
 });

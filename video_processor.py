@@ -26,7 +26,7 @@ class VideoProcessor:
         # Initialize YOLO model for vehicle detection
         if CV_AVAILABLE:
             try:
-                self.yolo_model = YOLO('yolov8s.pt')  # Will download if not present
+                self.yolo_model = YOLO('model\\yolov8s.pt')  # Will download if not present
                 self.logger.info("YOLO model loaded successfully")
             except Exception as e:
                 self.logger.error(f"Failed to load YOLO model: {e}")
