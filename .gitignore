@@ -1,3 +1,9 @@
 /venv
 /.local
 /__pycache__
+/model
+*.pyc
+.DS_Store
+.env
+output/
+*.log
