@@ -1,29 +1,33 @@
-// Video Upload JavaScript for Smart Parking System
+// Video Upload JavaScript - License Plate Detection & OCR
 document.addEventListener('DOMContentLoaded', function() {
     const uploadForm = document.getElementById('uploadForm');
     const uploadBtn = document.getElementById('uploadBtn');
     const videoInput = document.getElementById('video');
     const uploadModal = new bootstrap.Modal(document.getElementById('uploadModal'));
+    const plateDetailModal = new bootstrap.Modal(document.getElementById('plateDetailModal'));
     const uploadProgressBar = document.getElementById('upload-progress-bar');
+    const exportResultsBtn = document.getElementById('export-results-btn');
     
-    // Initialize Socket.IO connection for real-time updates
+    let detectedPlates = [];
+    let currentProcessingId = null;
+    
+    // Initialize Socket.IO
     const socket = io();
     
     // Form submission handler
     uploadForm.addEventListener('submit', function(e) {
         e.preventDefault();
         
-        const formData = new FormData(uploadForm);
         const file = videoInput.files[0];
         
         if (!file) {
-            alert('Please select a video file');
+            showAlert('Please select a video file', 'warning');
             return;
         }
         
         // Validate file size (100MB limit)
         if (file.size > 100 * 1024 * 1024) {
-            alert('File size exceeds 100MB limit');
+            showAlert('File size exceeds 100MB limit', 'danger');
             return;
         }
         
@@ -31,43 +35,46 @@ document.addEventListener('DOMContentLoaded', function() {
         uploadModal.show();
         uploadBtn.disabled = true;
         
-        // Create XMLHttpRequest for file upload with progress
+        const formData = new FormData();
+        formData.append('video', file);
+        
+        // Create XMLHttpRequest for upload progress
         const xhr = new XMLHttpRequest();
         
-        // Upload progress
         xhr.upload.addEventListener('progress', function(e) {
             if (e.lengthComputable) {
                 const percentComplete = (e.loaded / e.total) * 100;
                 uploadProgressBar.style.width = percentComplete + '%';
-                uploadProgressBar.setAttribute('aria-valuenow', percentComplete);
             }
         });
         
-        // Upload complete
         xhr.addEventListener('load', function() {
             uploadModal.hide();
             uploadBtn.disabled = false;
             
             if (xhr.status === 200) {
-                // Success
-                showAlert('Video uploaded successfully and processing started!', 'success');
-                uploadForm.reset();
-                showProcessingStatus();
+                const response = JSON.parse(xhr.responseText);
+                if (response.success) {
+                    showAlert('Video uploaded successfully! Processing started...', 'success');
+                    uploadForm.reset();
+                    showProcessingStatus();
+                    detectedPlates = [];
+                    updatePlatesDisplay();
+                } else {
+                    showAlert(response.message || 'Error uploading video', 'danger');
+                }
             } else {
-                // Error
                 showAlert('Error uploading video. Please try again.', 'danger');
             }
         });
         
-        // Upload error
         xhr.addEventListener('error', function() {
             uploadModal.hide();
             uploadBtn.disabled = false;
             showAlert('Error uploading video. Please check your connection.', 'danger');
         });
         
-        // Send the request
-        xhr.open('POST', '/upload_video');
+        xhr.open('POST', '/upload_video_for_plates');
         xhr.send(formData);
     });
     
@@ -75,40 +82,61 @@ document.addEventListener('DOMContentLoaded', function() {
     videoInput.addEventListener('change', function(e) {
         const file = e.target.files[0];
         if (file) {
-            // Show file info
             const fileSize = (file.size / (1024 * 1024)).toFixed(2);
-            const fileInfo = document.createElement('div');
-            fileInfo.className = 'alert alert-info mt-2';
-            fileInfo.innerHTML = `
-                <i class="bi bi-info-circle me-2"></i>
-                Selected: <strong>${file.name}</strong> (${fileSize} MB)
-            `;
-            
-            // Remove any existing file info
-            const existingInfo = uploadForm.querySelector('.alert-info');
-            if (existingInfo) {
-                existingInfo.remove();
-            }
-            
-            // Add after file input
-            videoInput.parentNode.appendChild(fileInfo);
+            showAlert(`Selected: <strong>${file.name}</strong> (${fileSize} MB)`, 'info');
         }
     });
     
-    // Socket event handlers for real-time processing updates
-    socket.on('processing_update', function(data) {
-        updateProcessingStatus(data);
+    // Socket event handlers
+    socket.on('plate_detected', function(data) {
+        console.log('Plate detected:', data);
+        addDetectedPlate(data);
     });
     
-    socket.on('processing_complete', function(data) {
-        hideProcessingStatus();
-        showAlert(`Video processing completed! Detected ${data.vehicles} vehicles and ${data.license_plates} license plates.`, 'success');
-        updateProcessingHistory(data);
+    socket.on('new_detection', function(data) {
+        console.log('Detection update:', data);
+        
+        // Handle different types of detection updates
+        if (data.type === 'processing_update') {
+            updateProcessingStatus(data);
+        } else if (data.type === 'processing_complete') {
+            hideProcessingStatus();
+            showAlert(`Processing complete! Detected ${data.plates_detected} license plates with ${data.plates_recognized} successfully recognized.`, 'success');
+            exportResultsBtn.disabled = detectedPlates.length === 0;
+        } else if (data.type === 'error') {
+            hideProcessingStatus();
+            showAlert(`Processing error: ${data.message}`, 'danger');
+        }
     });
     
     socket.on('processing_error', function(data) {
         hideProcessingStatus();
         showAlert(`Processing error: ${data.error}`, 'danger');
+    });
+    
+    // Export results handler
+    exportResultsBtn.addEventListener('click', function() {
+        if (detectedPlates.length === 0) {
+            showAlert('No plates to export', 'warning');
+            return;
+        }
+        
+        // Create CSV content
+        let csv = 'Plate Number,Confidence,Frame,Timestamp\n';
+        detectedPlates.forEach(plate => {
+            csv += `${plate.plate_number},${plate.confidence},${plate.frame},${plate.timestamp}\n`;
+        });
+        
+        // Download CSV
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `license_plates_${new Date().toISOString().slice(0,10)}.csv`;
+        a.click();
+        window.URL.revokeObjectURL(url);
+        
+        showAlert('Results exported successfully!', 'success');
     });
     
     function showProcessingStatus() {
@@ -119,10 +147,9 @@ document.addEventListener('DOMContentLoaded', function() {
         progressDiv.classList.remove('d-none');
         
         // Reset counters
-        document.getElementById('vehicles-detected').textContent = '0';
-        document.getElementById('plates-recognized').textContent = '0';
-        document.getElementById('sessions-created').textContent = '0';
         document.getElementById('frames-processed').textContent = '0';
+        document.getElementById('plates-detected').textContent = '0';
+        document.getElementById('plates-recognized').textContent = '0';
         
         // Reset progress bar
         const progressBar = document.getElementById('progress-bar');
@@ -139,58 +166,125 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     function updateProcessingStatus(data) {
-        // Update progress bar
         if (data.progress !== undefined) {
             const progressBar = document.getElementById('progress-bar');
             progressBar.style.width = data.progress + '%';
             document.getElementById('progress-percentage').textContent = data.progress.toFixed(1) + '%';
         }
         
-        // Update counters
-        if (data.vehicles_detected !== undefined) {
-            document.getElementById('vehicles-detected').textContent = data.vehicles_detected;
+        if (data.frames_processed !== undefined) {
+            document.getElementById('frames-processed').textContent = data.frames_processed;
+        }
+        
+        if (data.plates_detected !== undefined) {
+            document.getElementById('plates-detected').textContent = data.plates_detected;
         }
         
         if (data.plates_recognized !== undefined) {
             document.getElementById('plates-recognized').textContent = data.plates_recognized;
         }
+    }
+    
+    function addDetectedPlate(plateData) {
+        detectedPlates.push(plateData);
+        updatePlatesDisplay();
         
-        if (data.sessions_created !== undefined) {
-            document.getElementById('sessions-created').textContent = data.sessions_created;
-        }
+        // Update counter
+        document.getElementById('plates-detected').textContent = detectedPlates.length;
         
-        if (data.frames_processed !== undefined) {
-            document.getElementById('frames-processed').textContent = data.frames_processed;
+        if (plateData.plate_number) {
+            const recognized = detectedPlates.filter(p => p.plate_number).length;
+            document.getElementById('plates-recognized').textContent = recognized;
         }
     }
     
-    function updateProcessingHistory(data) {
-        const historyTable = document.getElementById('processing-history');
+    function updatePlatesDisplay() {
+        const container = document.getElementById('detected-plates-container');
+        const grid = document.getElementById('plates-grid');
         
-        // Remove "no data" message if it exists
-        const noDataRow = historyTable.querySelector('td[colspan="7"]');
-        if (noDataRow) {
-            noDataRow.parentNode.remove();
+        if (detectedPlates.length === 0) {
+            container.style.display = 'block';
+            grid.style.display = 'none';
+            return;
         }
         
-        // Create new row
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <td>${data.filename}</td>
-            <td>${new Date(data.upload_time).toLocaleString()}</td>
-            <td>${data.duration || 'N/A'}</td>
-            <td><span class="badge bg-primary">${data.vehicles || 0}</span></td>
-            <td><span class="badge bg-success">${data.license_plates || 0}</span></td>
-            <td><span class="badge bg-success">Completed</span></td>
-            <td>
-                <button class="btn btn-sm btn-outline-primary" onclick="viewResults('${data.id}')">
-                    <i class="bi bi-eye me-1"></i>View
-                </button>
-            </td>
+        container.style.display = 'none';
+        grid.style.display = 'flex';
+        grid.innerHTML = '';
+        
+        detectedPlates.forEach((plate, index) => {
+            const card = createPlateCard(plate, index);
+            grid.appendChild(card);
+        });
+        
+        exportResultsBtn.disabled = false;
+    }
+    
+    function createPlateCard(plateData, index) {
+        const col = document.createElement('div');
+        col.className = 'col-md-4 col-lg-3';
+        
+        const confidence = plateData.confidence ? (plateData.confidence * 100).toFixed(1) : 'N/A';
+        const plateNumber = plateData.plate_number || 'Unrecognized';
+        const badgeClass = plateData.plate_number ? 'bg-success' : 'bg-warning text-dark';
+        
+        col.innerHTML = `
+            <div class="card h-100 plate-card" data-plate-id="${index}" style="cursor: pointer;">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <span class="badge ${badgeClass}">#${index + 1}</span>
+                        <small class="text-muted">Frame ${plateData.frame || 'N/A'}</small>
+                    </div>
+                    
+                    ${plateData.image_url ? `
+                        <img src="${plateData.image_url}" class="img-fluid rounded mb-2" alt="License Plate">
+                    ` : `
+                        <div class="bg-secondary rounded d-flex align-items-center justify-content-center" style="height: 100px;">
+                            <i class="bi bi-image text-white" style="font-size: 2rem;"></i>
+                        </div>
+                    `}
+                    
+                    <h6 class="card-title mb-1">${plateNumber}</h6>
+                    <small class="text-muted">Confidence: ${confidence}%</small>
+                </div>
+            </div>
         `;
         
-        // Add to top of table
-        historyTable.insertBefore(row, historyTable.firstChild);
+        // Add click handler
+        col.querySelector('.plate-card').addEventListener('click', () => {
+            showPlateDetail(plateData, index);
+        });
+        
+        return col;
+    }
+    
+    function showPlateDetail(plateData, index) {
+        // Populate modal
+        if (plateData.image_url) {
+            document.getElementById('modal-plate-image').src = plateData.image_url;
+        }
+        
+        document.getElementById('modal-plate-number').textContent = plateData.plate_number || 'Unrecognized';
+        document.getElementById('modal-confidence').textContent = plateData.confidence 
+            ? (plateData.confidence * 100).toFixed(1) + '%' 
+            : 'N/A';
+        document.getElementById('modal-frame').textContent = plateData.frame || 'N/A';
+        document.getElementById('modal-timestamp').textContent = plateData.timestamp 
+            ? new Date(plateData.timestamp).toLocaleString() 
+            : 'N/A';
+        
+        // Download button
+        const downloadBtn = document.getElementById('download-plate-btn');
+        downloadBtn.onclick = function() {
+            if (plateData.image_url) {
+                const a = document.createElement('a');
+                a.href = plateData.image_url;
+                a.download = `plate_${index + 1}_${plateData.plate_number || 'unknown'}.jpg`;
+                a.click();
+            }
+        };
+        
+        plateDetailModal.show();
     }
     
     function showAlert(message, type) {
@@ -201,12 +295,10 @@ document.addEventListener('DOMContentLoaded', function() {
             <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
         `;
         
-        // Insert after the main heading
         const container = document.querySelector('.container');
         const heading = container.querySelector('.row');
         container.insertBefore(alertDiv, heading.nextSibling);
         
-        // Auto-remove after 5 seconds
         setTimeout(() => {
             if (alertDiv.parentNode) {
                 alertDiv.remove();
@@ -214,7 +306,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }, 5000);
     }
     
-    // Drag and drop functionality
+    // Drag and drop
     const uploadArea = uploadForm.querySelector('.card-body');
     
     uploadArea.addEventListener('dragover', function(e) {
@@ -234,21 +326,30 @@ document.addEventListener('DOMContentLoaded', function() {
         const files = e.dataTransfer.files;
         if (files.length > 0) {
             const file = files[0];
-            
-            // Check file type
             const allowedTypes = ['video/mp4', 'video/avi', 'video/quicktime', 'video/x-msvideo'];
             if (allowedTypes.includes(file.type) || file.name.match(/\.(mp4|avi|mov|mkv)$/i)) {
                 videoInput.files = files;
                 videoInput.dispatchEvent(new Event('change'));
             } else {
-                showAlert('Please select a valid video file (MP4, AVI, MOV, MKV)', 'warning');
+                showAlert('Please drop a valid video file', 'warning');
             }
         }
     });
+    
+    // Poll for status updates if processing
+    function checkProcessingStatus() {
+        fetch('/api/processing_status')
+            .then(response => response.json())
+            .then(data => {
+                if (data.is_processing) {
+                    showProcessingStatus();
+                }
+            })
+            .catch(error => {
+                console.error('Error checking status:', error);
+            });
+    }
+    
+    // Check on page load
+    checkProcessingStatus();
 });
-
-// Global function for viewing processing results
-function viewResults(processId) {
-    // This would open a modal or navigate to a results page
-    alert(`Viewing results for process ${processId} (Feature to be implemented)`);
-}

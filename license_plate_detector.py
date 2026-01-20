@@ -21,7 +21,7 @@ class LicensePlateDetector:
                 
                 # For demonstration, we'll use a general approach with image processing
                 # and OCR-like pattern recognition
-                self.model = None
+                self.model = YOLO('model/license_plate.pt')  # Placeholder model
                 self.logger.info("License plate detector initialized (using fallback method)")
             except Exception as e:
                 self.logger.error(f"Failed to load license plate model: {e}")

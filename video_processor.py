@@ -1,6 +1,7 @@
 import threading
 import time
 import logging
+import os
 from datetime import datetime
 try:
     import cv2
@@ -14,20 +15,26 @@ from models import db
 from models import DetectionLog, ParkingSpace, Vehicle, ParkingSession
 from license_plate_detector import LicensePlateDetector
 from parking_manager import ParkingManager
+from parking_detector import ParkingDetector
+
 
 class VideoProcessor:
-    def __init__(self, app=None):
+    def __init__(self):
         self.logger = logging.getLogger(__name__)
         self.is_processing = False
         self.current_thread = None
+        self.current_frame = 0
+        self.total_frames = 0
+        
+        # Broadcast functions
         self.broadcast_parking_update = None
         self.broadcast_detection = None
-        self.app = app  # Store Flask app instance
+        self.broadcast_plate_detection = None
         
-        # Initialize YOLO model for vehicle detection
+        # Initialize YOLO model for vehicle detection (for plate detection mode)
         if CV_AVAILABLE:
             try:
-                self.yolo_model = YOLO('model\\yolov8s.pt')  # Will download if not present
+                self.yolo_model = YOLO('model\\yolov8s.pt')
                 self.logger.info("YOLO model loaded successfully")
             except Exception as e:
                 self.logger.error(f"Failed to load YOLO model: {e}")
@@ -36,119 +43,62 @@ class VideoProcessor:
             self.logger.warning("Computer vision libraries not available - using mock detection")
             self.yolo_model = None
         
+        # Initialize parking detector (for parking space detection mode)
+        self.parking_detector = ParkingDetector()
+        
         # Initialize license plate detector
         self.lp_detector = LicensePlateDetector()
         
         # Initialize parking manager
         self.parking_manager = ParkingManager()
         
-        # Vehicle tracking variables
-        self.vehicle_tracks = {}
-        self.next_track_id = 1
-        self.tracking_threshold = 50  # pixels
-    
-    def set_app(self, app):
-        """Set Flask app instance"""
-        self.app = app
+        # Detected plates storage
+        self.detected_plates = []
+        self.plates_folder = 'uploads/detected_plates'
+        os.makedirs(self.plates_folder, exist_ok=True)
         
-    def set_broadcast_functions(self, broadcast_parking_update, broadcast_detection):
+        # Processing statistics
+        self.plates_detected = 0
+        self.plates_recognized = 0
+        
+        # Processing mode
+        self.processing_mode = 'parking'  # 'parking' or 'plates'
+        
+    def set_broadcast_functions(self, broadcast_parking_update, broadcast_detection, broadcast_plate_detection):
         """Set broadcast functions for real-time updates"""
         self.broadcast_parking_update = broadcast_parking_update
         self.broadcast_detection = broadcast_detection
+        self.broadcast_plate_detection = broadcast_plate_detection
+        self.parking_manager.set_broadcast_function(broadcast_parking_update)
     
-    def start_live_processing(self, camera_index=0):
-        """Start processing live video feed from camera"""
+    def process_video_file(self, filepath, mode='parking'):
+        """
+        Process uploaded video file
+        
+        Args:
+            filepath: Path to video file
+            mode: 'parking' for parking detection, 'plates' for license plate detection
+        """
         if self.is_processing:
             self.logger.warning("Video processing already in progress")
             return
         
         self.is_processing = True
-        self.current_thread = threading.Thread(
-            target=self._process_live_feed,
-            args=(camera_index,),
-            daemon=True
-        )
-        self.current_thread.start()
-        self.logger.info(f"Started live video processing from camera {camera_index}")
-    
-    def stop_live_processing(self):
-        """Stop live video processing"""
-        self.is_processing = False
-        if self.current_thread:
-            self.current_thread.join(timeout=5)
-        self.logger.info("Stopped live video processing")
-    
-    def get_current_frame(self):
-        """Get the current processed frame for streaming"""
-        # Return the last processed frame
-        if hasattr(self, 'last_frame'):
-            return self.last_frame
-        return None
-
-    def process_video_file(self, filepath):
-        """Process uploaded video file"""
-        if self.is_processing:
-            self.logger.warning("Video processing already in progress")
-            return
+        self.processing_mode = mode
         
-        self.is_processing = True
+        # Reset statistics
+        self.detected_plates = []
+        self.plates_detected = 0
+        self.plates_recognized = 0
+        self.current_frame = 0
+        
         self.current_thread = threading.Thread(
             target=self._process_video_file,
             args=(filepath,),
             daemon=True
         )
         self.current_thread.start()
-        self.logger.info(f"Started processing video file: {filepath}")
-    
-    def _process_live_feed(self, camera_index):
-        """Internal method to process live video feed"""
-        if not CV_AVAILABLE:
-            self.logger.warning("Computer vision not available - using mock live feed")
-            self._mock_live_feed()
-            return
-        
-        # CRITICAL: Push application context for database access
-        if self.app:
-            with self.app.app_context():
-                self._process_live_feed_with_context(camera_index)
-        else:
-            self.logger.error("No Flask app instance available")
-            self.is_processing = False
-    
-    def _process_live_feed_with_context(self, camera_index):
-        """Process live feed within Flask app context"""
-        cap = cv2.VideoCapture(camera_index)
-        if not cap.isOpened():
-            self.logger.error(f"Cannot open camera {camera_index}")
-            self.is_processing = False
-            return
-        
-        self.logger.info("Live video processing started")
-        frame_count = 0
-        
-        try:
-            while self.is_processing:
-                ret, frame = cap.read()
-                if not ret:
-                    self.logger.warning("Failed to read frame from camera")
-                    break
-                
-                # Store last frame for potential streaming
-                self.last_frame = frame.copy()
-                
-                # Process every 5th frame to reduce computational load
-                if frame_count % 5 == 0:
-                    self._process_frame(frame, frame_count)
-                
-                frame_count += 1
-                time.sleep(0.1)  # Small delay to prevent overwhelming the system
-                
-        except Exception as e:
-            self.logger.error(f"Error in live video processing: {e}")
-        finally:
-            cap.release()
-            self.is_processing = False
-            self.logger.info("Live video processing ended")
+        self.logger.info(f"Started processing video file: {filepath} in {mode} mode")
     
     def _process_video_file(self, filepath):
         """Internal method to process video file"""
@@ -157,350 +107,383 @@ class VideoProcessor:
             self._mock_video_processing(filepath)
             return
         
-        # CRITICAL: Push application context for database access
-        if self.app:
-            with self.app.app_context():
-                self._process_video_file_with_context(filepath)
+        # Choose processing method based on mode
+        if self.processing_mode == 'parking':
+            self._process_video_parking(filepath)
         else:
-            self.logger.error("No Flask app instance available")
-            self.is_processing = False
+            self._process_video_plates(filepath)
     
-    def _process_video_file_with_context(self, filepath):
-        """Process video file within Flask app context"""
+    def _process_video_parking(self, filepath):
+        """Process video for parking space occupancy detection"""
+        if not self.parking_detector.is_configured():
+            self.logger.error("Parking detector not configured. Please upload configuration files first.")
+            self.is_processing = False
+            
+            if self.broadcast_detection:
+                self.broadcast_detection({
+                    'type': 'error',
+                    'message': 'Parking configuration not found. Please configure parking spaces first.'
+                })
+            return
+        
+        # Initialize parking detector models
+        if not self.parking_detector.initialize_models():
+            self.logger.error("Failed to initialize parking detection models")
+            self.is_processing = False
+            
+            if self.broadcast_detection:
+                self.broadcast_detection({
+                    'type': 'error',
+                    'message': 'Failed to initialize parking detection models'
+                })
+            return
+        
         cap = cv2.VideoCapture(filepath)
         if not cap.isOpened():
             self.logger.error(f"Cannot open video file: {filepath}")
             self.is_processing = False
+            
+            if self.broadcast_detection:
+                self.broadcast_detection({
+                    'type': 'error',
+                    'message': 'Failed to open video file'
+                })
             return
         
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        self.total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         fps = cap.get(cv2.CAP_PROP_FPS)
-        self.logger.info(f"Processing video: {total_frames} frames at {fps} FPS")
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        
+        self.logger.info(f"Processing parking video: {self.total_frames} frames at {fps} FPS")
+        
+        # Create output video
+        output_path = filepath.replace('.mp4', '_parking_output.mp4')
+        out = cv2.VideoWriter(
+            output_path,
+            cv2.VideoWriter_fourcc(*'mp4v'),
+            fps,
+            (width * 2, height)  # Double width for side-by-side view
+        )
         
         frame_count = 0
+        frame_skip = 2  # Process every 2nd frame
         
         try:
-            while self.is_processing and frame_count < total_frames:
+            while self.is_processing and frame_count < self.total_frames:
                 ret, frame = cap.read()
                 if not ret:
                     break
                 
+                self.current_frame = frame_count
+                
                 # Process frame
-                self._process_frame(frame, frame_count)
+                if frame_count % frame_skip == 0:
+                    processed_frame, schematic, slot_status = self.parking_detector.process_frame(frame, frame_count)
+                    
+                    # Create combined output
+                    combined = self.parking_detector.create_combined_output(processed_frame, schematic)
+                    out.write(combined)
+                    
+                    # Update parking space database
+                    if slot_status:
+                        self._update_parking_spaces_from_slots(slot_status)
+                    
+                    # Broadcast update
+                    if slot_status and self.broadcast_detection:
+                        occupied = sum(slot_status)
+                        available = len(slot_status) - occupied
+                        
+                        self.broadcast_detection({
+                            'type': 'parking_status',
+                            'occupied': occupied,
+                            'available': available,
+                            'total': len(slot_status),
+                            'vehicle_count': occupied
+                        })
+                
                 frame_count += 1
                 
-                # Update progress (every 100 frames)
-                if frame_count % 100 == 0:
-                    progress = (frame_count / total_frames) * 100
-                    self.logger.info(f"Processing progress: {progress:.1f}%")
+                # Update progress
+                if frame_count % 50 == 0:
+                    progress = (frame_count / self.total_frames) * 100
+                    self._broadcast_progress(progress, frame_count)
+                
+        except Exception as e:
+            self.logger.error(f"Error processing parking video: {e}")
+            
+            if self.broadcast_detection:
+                self.broadcast_detection({
+                    'type': 'error',
+                    'message': f'Processing error: {str(e)}'
+                })
+        finally:
+            cap.release()
+            out.release()
+            self.is_processing = False
+            
+            # Broadcast completion
+            self._broadcast_completion(frame_count)
+            
+            self.logger.info(f"Parking video processing completed: {frame_count} frames processed")
+            self.logger.info(f"Output saved to: {output_path}")
+    
+    def _process_video_plates(self, filepath):
+        """Process video for license plate detection (original logic)"""
+        cap = cv2.VideoCapture(filepath)
+        if not cap.isOpened():
+            self.logger.error(f"Cannot open video file: {filepath}")
+            self.is_processing = False
+            
+            if self.broadcast_detection:
+                self.broadcast_detection({
+                    'type': 'error',
+                    'message': 'Failed to open video file'
+                })
+            return
+        
+        self.total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        self.logger.info(f"Processing license plates: {self.total_frames} frames at {fps} FPS")
+        
+        frame_count = 0
+        
+        try:
+            while self.is_processing and frame_count < self.total_frames:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                
+                self.current_frame = frame_count
+                
+                # Process every 5th frame for performance
+                if frame_count % 5 == 0:
+                    self._process_frame_for_plates(frame, frame_count)
+                
+                frame_count += 1
+                
+                # Update progress
+                if frame_count % 50 == 0:
+                    progress = (frame_count / self.total_frames) * 100
+                    self._broadcast_progress(progress, frame_count)
                 
         except Exception as e:
             self.logger.error(f"Error processing video file: {e}")
+            
+            if self.broadcast_detection:
+                self.broadcast_detection({
+                    'type': 'error',
+                    'message': f'Processing error: {str(e)}'
+                })
         finally:
             cap.release()
             self.is_processing = False
+            
+            # Broadcast completion
+            self._broadcast_completion(frame_count)
+            
             self.logger.info(f"Video file processing completed: {frame_count} frames processed")
     
-    def _process_frame(self, frame, frame_number):
-        """Process a single frame for vehicle detection and license plate recognition"""
+    def _process_frame_for_plates(self, frame, frame_number):
+        """Process a single frame for license plate detection"""
         if self.yolo_model is None:
             return
         
         try:
             # Detect vehicles using YOLO
             results = self.yolo_model(frame, verbose=False)
-            vehicles = []
             
             for result in results:
                 boxes = result.boxes
                 if boxes is not None:
                     for box in boxes:
-                        # Filter for vehicle classes (car, truck, bus, motorcycle)
+                        # Filter for vehicle classes
                         class_id = int(box.cls[0])
-                        if class_id in [2, 5, 7, 3]:  # car, bus, truck, motorcycle in COCO dataset
+                        if class_id in [2, 5, 7, 3]:
                             confidence = float(box.conf[0])
-                            if confidence > 0.5:  # Confidence threshold
-                                x1, y1, x2, y2 = box.xyxy[0].tolist()
-                                vehicles.append({
-                                    'bbox': [int(x1), int(y1), int(x2), int(y2)],
-                                    'confidence': confidence,
-                                    'class_id': class_id
-                                })
-            
-            # Update vehicle count and parking spaces
-            self._update_parking_spaces(vehicles, frame)
-            
-            # Track vehicles and detect license plates
-            self._track_vehicles(vehicles, frame)
-            
-            # Log detection
-            try:
-                detection = DetectionLog(
-                    detection_type='detection',
-                    vehicle_count=len(vehicles),
-                    timestamp=datetime.utcnow()
-                )
-                db.session.add(detection)
-                db.session.commit()
-            except Exception as e:
-                self.logger.error(f"Error logging detection: {e}")
-                db.session.rollback()
-            
-            # Broadcast real-time update
-            if self.broadcast_detection:
-                self.broadcast_detection({
-                    'vehicle_count': len(vehicles),
-                    'timestamp': datetime.utcnow().isoformat(),
-                    'frame_number': frame_number
-                })
+                            if confidence > 0.5:
+                                x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                                
+                                # Extract vehicle region
+                                vehicle_roi = frame[y1:y2, x1:x2]
+                                
+                                # Detect license plate
+                                self._detect_and_save_plate(vehicle_roi, frame, frame_number)
                 
         except Exception as e:
             self.logger.error(f"Error processing frame {frame_number}: {e}")
     
-    def _update_parking_spaces(self, vehicles, frame):
-        """Update parking space occupancy based on detected vehicles"""
+    def _detect_and_save_plate(self, vehicle_roi, full_frame, frame_number):
+        """Detect license plate in vehicle ROI and save it"""
         try:
-            parking_spaces = ParkingSpace.query.all()
+            # Use license plate detector
+            license_plate_text = self.lp_detector.detect_license_plate(vehicle_roi)
             
-            for space in parking_spaces:
-                was_occupied = space.is_occupied
-                is_occupied = False
+            if license_plate_text:
+                self.plates_detected += 1
                 
-                # Check if any vehicle overlaps with this parking space
-                for vehicle in vehicles:
-                    x1, y1, x2, y2 = vehicle['bbox']
-                    
-                    # Check for overlap with parking space
-                    if self._rectangles_overlap(
-                        (x1, y1, x2, y2),
-                        (space.x1, space.y1, space.x2, space.y2)
-                    ):
-                        is_occupied = True
-                        break
+                # Save cropped plate image
+                plate_filename = f'plate_{self.plates_detected}_{frame_number}.jpg'
+                plate_path = os.path.join(self.plates_folder, plate_filename)
                 
-                space.is_occupied = is_occupied
+                cv2.imwrite(plate_path, vehicle_roi)
                 
-                # If occupancy changed, broadcast update
-                if was_occupied != is_occupied and self.broadcast_parking_update:
-                    self.broadcast_parking_update({
-                        'space_id': space.id,
-                        'space_name': space.name,
-                        'is_occupied': is_occupied,
-                        'timestamp': datetime.utcnow().isoformat()
-                    })
-            
-            db.session.commit()
+                # Determine if recognized
+                is_recognized = license_plate_text and license_plate_text != 'Unknown'
+                if is_recognized:
+                    self.plates_recognized += 1
+                
+                # Create plate data
+                plate_data = {
+                    'plate_number': license_plate_text,
+                    'confidence': 0.85,
+                    'frame': frame_number,
+                    'timestamp': datetime.utcnow().isoformat(),
+                    'image_url': f'/api/plate_image/{self.plates_detected}',
+                    'image_path': plate_path
+                }
+                
+                self.detected_plates.append(plate_data)
+                
+                # Log to database
+                with db.session.begin():
+                    detection = DetectionLog(
+                        detection_type='license_plate',
+                        license_plate=license_plate_text,
+                        confidence=0.85,
+                        timestamp=datetime.utcnow()
+                    )
+                    db.session.add(detection)
+                    db.session.commit()
+                
+                # Broadcast
+                if self.broadcast_plate_detection:
+                    self.broadcast_plate_detection(plate_data)
+                
+                # Handle parking session
+                if is_recognized:
+                    self.parking_manager.handle_vehicle_detection(license_plate_text)
+                
+        except Exception as e:
+            self.logger.error(f"Error detecting/saving plate: {e}")
+    
+    def _update_parking_spaces_from_slots(self, slot_status):
+        """Update parking space occupancy in database from slot status"""
+        try:
+            with db.session.begin():
+                # Get all parking spaces (assuming they match slot indices)
+                spaces = ParkingSpace.query.order_by(ParkingSpace.id).all()
+                
+                for i, is_occupied in enumerate(slot_status):
+                    if i < len(spaces):
+                        space = spaces[i]
+                        was_occupied = space.is_occupied
+                        space.is_occupied = is_occupied
+                        
+                        # Broadcast if changed
+                        if was_occupied != is_occupied and self.broadcast_parking_update:
+                            self.broadcast_parking_update({
+                                'space_id': space.id,
+                                'space_name': space.name,
+                                'is_occupied': is_occupied,
+                                'timestamp': datetime.utcnow().isoformat()
+                            })
+                
+                db.session.commit()
                 
         except Exception as e:
             self.logger.error(f"Error updating parking spaces: {e}")
             db.session.rollback()
     
-    def _rectangles_overlap(self, rect1, rect2):
-        """Check if two rectangles overlap"""
-        x1_1, y1_1, x2_1, y2_1 = rect1
-        x1_2, y1_2, x2_2, y2_2 = rect2
-        
-        return not (x2_1 < x1_2 or x2_2 < x1_1 or y2_1 < y1_2 or y2_2 < y1_1)
+    def _broadcast_progress(self, progress, frames_processed):
+        """Broadcast processing progress"""
+        if self.broadcast_detection:
+            self.broadcast_detection({
+                'type': 'processing_update',
+                'progress': progress,
+                'frames_processed': frames_processed,
+                'plates_detected': self.plates_detected,
+                'plates_recognized': self.plates_recognized
+            })
     
-    def _track_vehicles(self, vehicles, frame):
-        """Track vehicles across frames and detect license plates"""
-        current_tracks = {}
-        
-        for vehicle in vehicles:
-            bbox = vehicle['bbox']
-            center_x = (bbox[0] + bbox[2]) / 2
-            center_y = (bbox[1] + bbox[3]) / 2
-            
-            # Find closest existing track
-            closest_track_id = None
-            min_distance = float('inf')
-            
-            for track_id, track_data in self.vehicle_tracks.items():
-                prev_center = track_data['center']
-                distance = np.sqrt((center_x - prev_center[0])**2 + (center_y - prev_center[1])**2)
-                
-                if distance < min_distance and distance < self.tracking_threshold:
-                    min_distance = distance
-                    closest_track_id = track_id
-            
-            # Assign track ID
-            if closest_track_id is not None:
-                track_id = closest_track_id
-            else:
-                track_id = self.next_track_id
-                self.next_track_id += 1
-            
-            # Update track data
-            current_tracks[track_id] = {
-                'center': (center_x, center_y),
-                'bbox': bbox,
-                'last_seen': datetime.utcnow(),
-                'vehicle_data': vehicle
-            }
-            
-            # Detect license plate for new or long-unseen vehicles
-            if (track_id not in self.vehicle_tracks or 
-                (datetime.utcnow() - self.vehicle_tracks[track_id]['last_seen']).seconds > 30):
-                
-                self._detect_license_plate(frame, bbox, track_id)
-        
-        # Update vehicle tracks
-        self.vehicle_tracks = current_tracks
-    
-    def _detect_license_plate(self, frame, bbox, track_id):
-        """Detect license plate for a specific vehicle"""
-        try:
-            x1, y1, x2, y2 = bbox
-            vehicle_roi = frame[y1:y2, x1:x2]
-            
-            # Use license plate detector
-            license_plate = self.lp_detector.detect_license_plate(vehicle_roi)
-            
-            if license_plate:
-                self.logger.info(f"Detected license plate: {license_plate} for track {track_id}")
-                
-                # Record vehicle entry/exit
-                self.parking_manager.handle_vehicle_detection(license_plate)
-                
-                # Log detection
-                try:
-                    detection = DetectionLog(
-                        detection_type='license_plate',
-                        license_plate=license_plate,
-                        confidence=0.8,  # Placeholder confidence
-                        timestamp=datetime.utcnow()
-                    )
-                    db.session.add(detection)
-                    db.session.commit()
-                except Exception as e:
-                    self.logger.error(f"Error logging license plate detection: {e}")
-                    db.session.rollback()
-                
-                # Broadcast detection
-                if self.broadcast_detection:
-                    self.broadcast_detection({
-                        'type': 'license_plate',
-                        'license_plate': license_plate,
-                        'track_id': track_id,
-                        'timestamp': datetime.utcnow().isoformat()
-                    })
-                    
-        except Exception as e:
-            self.logger.error(f"Error detecting license plate: {e}")
-    
-    def _mock_live_feed(self):
-        """Mock live feed for demonstration when CV libraries are not available"""
-        # CRITICAL: Push application context for database access
-        if self.app:
-            with self.app.app_context():
-                self._mock_live_feed_with_context()
-        else:
-            self.logger.error("No Flask app instance available")
-            self.is_processing = False
-    
-    def _mock_live_feed_with_context(self):
-        """Mock live feed within Flask app context"""
-        self.logger.info("Starting mock live feed")
-        frame_count = 0
-        
-        while self.is_processing:
-            # Simulate processing every 5th frame
-            if frame_count % 5 == 0:
-                self._mock_process_frame(frame_count)
-            
-            frame_count += 1
-            time.sleep(0.5)  # Slower for demo purposes
-        
-        self.is_processing = False
-        self.logger.info("Mock live feed ended")
+    def _broadcast_completion(self, total_frames):
+        """Broadcast processing completion"""
+        if self.broadcast_detection:
+            self.broadcast_detection({
+                'type': 'processing_complete',
+                'total_frames': total_frames,
+                'plates_detected': self.plates_detected,
+                'plates_recognized': self.plates_recognized
+            })
     
     def _mock_video_processing(self, filepath):
         """Mock video processing for demonstration"""
-        # CRITICAL: Push application context for database access
-        if self.app:
-            with self.app.app_context():
-                self._mock_video_processing_with_context(filepath)
-        else:
-            self.logger.error("No Flask app instance available")
-            self.is_processing = False
-    
-    def _mock_video_processing_with_context(self, filepath):
-        """Mock video processing within Flask app context"""
         import os
-        self.logger.info(f"Starting mock processing of {os.path.basename(filepath)}")
-        
-        # Simulate processing 100 frames
-        total_frames = 100
-        frame_count = 0
-        
-        while self.is_processing and frame_count < total_frames:
-            self._mock_process_frame(frame_count)
-            frame_count += 1
-            
-            # Update progress every 10 frames
-            if frame_count % 10 == 0:
-                progress = (frame_count / total_frames) * 100
-                self.logger.info(f"Mock processing progress: {progress:.1f}%")
-            
-            time.sleep(0.2)  # Simulate processing time
-        
-        self.is_processing = False
-        self.logger.info(f"Mock video processing completed: {frame_count} frames processed")
-    
-    def _mock_process_frame(self, frame_number):
-        """Mock frame processing that generates simulated vehicle detections"""
         import random
         
-        # Simulate vehicle detection (random number between 0-5 vehicles)
-        vehicle_count = random.randint(0, 5)
+        self.logger.info(f"Starting mock processing of {os.path.basename(filepath)}")
         
-        # Simulate license plate detection occasionally
-        if random.random() < 0.3:  # 30% chance
-            mock_plates = ["ABC123", "XYZ789", "DEF456", "GHI012", "JKL345"]
-            license_plate = random.choice(mock_plates)
-            
-            # Record mock detection
-            self.parking_manager.handle_vehicle_detection(license_plate)
-            
-            # Log detection
-            try:
-                detection = DetectionLog(
-                    detection_type='license_plate',
-                    license_plate=license_plate,
-                    confidence=0.8,
-                    timestamp=datetime.utcnow()
-                )
-                db.session.add(detection)
-                db.session.commit()
-            except Exception as e:
-                self.logger.error(f"Error logging mock detection: {e}")
-                db.session.rollback()
-            
-            # Broadcast detection
-            if self.broadcast_detection:
-                self.broadcast_detection({
-                    'type': 'license_plate',
-                    'license_plate': license_plate,
-                    'timestamp': datetime.utcnow().isoformat()
-                })
+        self.total_frames = 100
+        frame_count = 0
         
-        # Log general detection
-        try:
-            detection = DetectionLog(
-                detection_type='detection',
-                vehicle_count=vehicle_count,
-                timestamp=datetime.utcnow()
-            )
-            db.session.add(detection)
-            db.session.commit()
-        except Exception as e:
-            self.logger.error(f"Error logging mock detection: {e}")
-            db.session.rollback()
+        while self.is_processing and frame_count < self.total_frames:
+            self.current_frame = frame_count
+            
+            # Simulate detection
+            if random.random() < 0.15:
+                self._mock_detect_plate(frame_count)
+            
+            frame_count += 1
+            
+            if frame_count % 10 == 0:
+                progress = (frame_count / self.total_frames) * 100
+                self._broadcast_progress(progress, frame_count)
+            
+            time.sleep(0.1)
         
-        # Broadcast real-time update
-        if self.broadcast_detection:
-            self.broadcast_detection({
-                'vehicle_count': vehicle_count,
-                'timestamp': datetime.utcnow().isoformat(),
-                'frame_number': frame_number
-            })
+        self.is_processing = False
+        self._broadcast_completion(frame_count)
+        self.logger.info(f"Mock video processing completed: {frame_count} frames processed")
+    
+    def _mock_detect_plate(self, frame_number):
+        """Mock plate detection"""
+        import random
+        
+        mock_plates = ["ABC123", "XYZ789", "DEF456", "GHI012", "JKL345"]
+        license_plate_text = random.choice(mock_plates)
+        
+        self.plates_detected += 1
+        is_recognized = random.random() < 0.8
+        
+        if not is_recognized:
+            license_plate_text = None
+        else:
+            self.plates_recognized += 1
+        
+        plate_data = {
+            'plate_number': license_plate_text or 'Unrecognized',
+            'confidence': random.uniform(0.7, 0.95),
+            'frame': frame_number,
+            'timestamp': datetime.utcnow().isoformat(),
+            'image_url': None,
+            'image_path': None
+        }
+        
+        self.detected_plates.append(plate_data)
+        
+        if self.broadcast_plate_detection:
+            self.broadcast_plate_detection(plate_data)
+        
+        if is_recognized and license_plate_text:
+            self.parking_manager.handle_vehicle_detection(license_plate_text)
+    
+    def get_detected_plates(self):
+        """Get list of detected plates"""
+        return self.detected_plates
+    
+    def stop_processing(self):
+        """Stop video processing"""
+        self.is_processing = False
+        if self.current_thread:
+            self.current_thread.join(timeout=5)
+        self.logger.info("Stopped video processing")

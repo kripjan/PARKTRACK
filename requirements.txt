@@ -1,0 +1,16 @@
+# Existing dependencies
+Flask
+flask-sqlalchemy
+flask-socketio
+flask-migrate
+psycopg2-binary
+werkzeug
+
+# Computer Vision 
+opencv-python
+numpy
+ultralytics
+
+# parking detection
+shapely>=2.0.0
+deep-sort-realtime>=1.3.2

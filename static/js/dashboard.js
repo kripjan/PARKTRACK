@@ -3,6 +3,13 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialize Socket.IO connection
     const socket = io();
     
+    // Video upload elements
+    const videoUploadForm = document.getElementById('video-upload-form');
+    const videoFileInput = document.getElementById('video-file');
+    const uploadVideoBtn = document.getElementById('upload-video-btn');
+    const uploadModal = new bootstrap.Modal(document.getElementById('uploadModal'));
+    const uploadProgressBar = document.getElementById('upload-progress-bar');
+    
     // Chart configuration
     let detectionChart;
     const chartData = {
@@ -24,18 +31,78 @@ document.addEventListener('DOMContentLoaded', function() {
     updateDurationCounters();
     setInterval(updateDurationCounters, 1000); // Update every second
     
-    // Video feed controls
-    setupVideoFeedControls();
+    // Video upload form handler
+    if (videoUploadForm) {
+        videoUploadForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const file = videoFileInput.files[0];
+            if (!file) {
+                showAlert('Please select a video file', 'warning');
+                return;
+            }
+            
+            // Validate file size (100MB limit)
+            if (file.size > 100 * 1024 * 1024) {
+                showAlert('File size exceeds 100MB limit', 'danger');
+                return;
+            }
+            
+            // Show upload modal
+            uploadModal.show();
+            uploadVideoBtn.disabled = true;
+            
+            const formData = new FormData();
+            formData.append('video', file);
+            
+            // Create XMLHttpRequest for upload progress
+            const xhr = new XMLHttpRequest();
+            
+            xhr.upload.addEventListener('progress', function(e) {
+                if (e.lengthComputable) {
+                    const percentComplete = (e.loaded / e.total) * 100;
+                    uploadProgressBar.style.width = percentComplete + '%';
+                }
+            });
+            
+            xhr.addEventListener('load', function() {
+                uploadModal.hide();
+                uploadVideoBtn.disabled = false;
+                
+                if (xhr.status === 200) {
+                    const response = JSON.parse(xhr.responseText);
+                    if (response.success) {
+                        showAlert('Video uploaded successfully! Processing started...', 'success');
+                        videoUploadForm.reset();
+                        updateVideoStatus('Processing video...', 'info');
+                    } else {
+                        showAlert(response.message || 'Error uploading video', 'danger');
+                    }
+                } else {
+                    showAlert('Error uploading video. Please try again.', 'danger');
+                }
+            });
+            
+            xhr.addEventListener('error', function() {
+                uploadModal.hide();
+                uploadVideoBtn.disabled = false;
+                showAlert('Error uploading video. Please check your connection.', 'danger');
+            });
+            
+            xhr.open('POST', '/upload_video');
+            xhr.send(formData);
+        });
+    }
     
     // Socket event handlers
     socket.on('connect', function() {
         console.log('Connected to server');
-        updateFeedStatus('Connected to Smart Parking System', 'success');
+        updateVideoStatus('Connected to Smart Parking System', 'success');
     });
     
     socket.on('disconnect', function() {
         console.log('Disconnected from server');
-        updateFeedStatus('Disconnected from server', 'danger');
+        updateVideoStatus('Disconnected from server', 'danger');
     });
     
     socket.on('parking_update', function(data) {
@@ -45,66 +112,6 @@ document.addEventListener('DOMContentLoaded', function() {
     socket.on('new_detection', function(data) {
         handleNewDetection(data);
     });
-    
-    function setupVideoFeedControls() {
-        // Handle start live feed button
-        const startFeedForm = document.getElementById('start-feed-form');
-        if (startFeedForm) {
-            startFeedForm.addEventListener('submit', function(e) {
-                // Don't prevent default - let form submit
-                // But show video container after a delay
-                setTimeout(function() {
-                    showVideoFeed();
-                }, 1000);
-            });
-        }
-        
-        // Handle stop live feed button
-        const stopFeedForm = document.querySelector('form[action*="stop_live_feed"]');
-        if (stopFeedForm) {
-            stopFeedForm.addEventListener('submit', function(e) {
-                // Don't prevent default - let form submit
-                // But hide video container immediately
-                hideVideoFeed();
-            });
-        }
-    }
-    
-    function showVideoFeed() {
-        const noVideo = document.getElementById('no-video');
-        const videoContainer = document.getElementById('video-container');
-        const videoFeed = document.getElementById('video-feed');
-        
-        if (noVideo && videoContainer && videoFeed) {
-            noVideo.style.display = 'none';
-            videoContainer.style.display = 'block';
-            
-            // Set video feed source - add timestamp to prevent caching
-            const videoUrl = window.location.origin + '/video_feed?' + new Date().getTime();
-            videoFeed.src = videoUrl;
-            
-            // Show success message
-            updateFeedStatus('Live video feed started', 'success');
-        }
-    }
-    
-    function hideVideoFeed() {
-        const noVideo = document.getElementById('no-video');
-        const videoContainer = document.getElementById('video-container');
-        const videoFeed = document.getElementById('video-feed');
-        
-        if (noVideo && videoContainer && videoFeed) {
-            // Stop video feed
-            videoFeed.src = '';
-            
-            // Hide video container
-            videoContainer.style.display = 'none';
-            noVideo.style.display = 'block';
-            
-            // Show info message
-            updateFeedStatus('Live video feed stopped', 'info');
-        }
-    }
     
     function initializeChart() {
         const ctx = document.getElementById('detectionChart');
@@ -127,12 +134,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 },
                 scales: {
                     x: {
-                        type: 'time',
-                        time: {
-                            displayFormats: {
-                                second: 'HH:mm:ss'
-                            }
-                        },
+                        type: 'category',
                         title: {
                             display: true,
                             text: 'Time'
@@ -174,20 +176,32 @@ document.addEventListener('DOMContentLoaded', function() {
     function handleNewDetection(data) {
         console.log('New detection:', data);
         
-        if (data.type === 'license_plate') {
+        if (data.type === 'license_plate' || data.license_plate) {
             addRecentActivity({
                 type: 'license_plate',
                 license_plate: data.license_plate,
                 timestamp: data.timestamp
             });
-        } else if (data.vehicle_count !== undefined) {
+        }
+        
+        if (data.vehicle_count !== undefined) {
             // Update real-time chart
             updateChart(data.vehicle_count, data.timestamp);
+        }
+        
+        // Handle processing updates
+        if (data.type === 'processing_update') {
+            updateVideoStatus(`Processing: ${data.progress?.toFixed(1)}% - ${data.frames_processed} frames`, 'info');
+        } else if (data.type === 'processing_complete') {
+            updateVideoStatus('Processing complete!', 'success');
+            showAlert(`Video processing complete! Detected ${data.plates_detected || 0} vehicles.`, 'success');
         }
     }
     
     function updateChart(vehicleCount, timestamp) {
-        const now = new Date(timestamp || Date.now());
+        if (!detectionChart) return;
+        
+        const now = timestamp ? new Date(timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
         
         // Add new data point
         chartData.labels.push(now);
@@ -200,15 +214,27 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         
         // Update chart
-        if (detectionChart) {
-            detectionChart.update('none');
-        }
+        detectionChart.update('none');
     }
     
     function updateStatistics() {
-        // This would typically fetch updated statistics from the server
-        // For now, we'll increment/decrement based on activity
-        console.log('Updating statistics...');
+        // Fetch updated statistics
+        fetch('/api/parking_statistics')
+            .then(response => response.json())
+            .then(data => {
+                if (data.total_spaces !== undefined) {
+                    document.getElementById('total-spaces').textContent = data.total_spaces;
+                }
+                if (data.occupied_spaces !== undefined) {
+                    document.getElementById('occupied-spaces').textContent = data.occupied_spaces;
+                }
+                if (data.available_spaces !== undefined) {
+                    document.getElementById('available-spaces').textContent = data.available_spaces;
+                }
+            })
+            .catch(error => {
+                console.error('Error updating statistics:', error);
+            });
     }
     
     function addRecentActivity(data) {
@@ -242,14 +268,14 @@ document.addEventListener('DOMContentLoaded', function() {
         } else if (data.type === 'exit') {
             icon = 'bi-arrow-left-circle';
             iconClass = 'text-danger';
-            description = `${data.license_plate} exited (${data.duration_minutes}min, Rs. ${data.toll_amount})`;
-        } else if (data.type === 'license_plate') {
+            description = `${data.license_plate} exited`;
+        } else if (data.type === 'license_plate' || data.license_plate) {
             icon = 'bi-credit-card';
             iconClass = 'text-warning';
             description = `Plate detected: ${data.license_plate}`;
         }
         
-        const timestamp = new Date(data.timestamp).toLocaleTimeString();
+        const timestamp = new Date(data.timestamp || Date.now()).toLocaleTimeString();
         
         item.innerHTML = `
             <div class="flex-shrink-0">
@@ -265,7 +291,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     function updateSpaceStatus(spaceId, isOccupied) {
-        // Update space status indicators if they exist on the page
         const spaceElements = document.querySelectorAll(`[data-space-id="${spaceId}"]`);
         spaceElements.forEach(element => {
             if (isOccupied) {
@@ -279,7 +304,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     function showNotification(data) {
-        // Create a toast notification for important events
         if (data.type === 'entry' || data.type === 'exit') {
             const toast = document.createElement('div');
             toast.className = 'toast align-items-center border-0 position-fixed top-0 end-0 m-3';
@@ -304,25 +328,19 @@ document.addEventListener('DOMContentLoaded', function() {
             const bsToast = new bootstrap.Toast(toast, { delay: 5000 });
             bsToast.show();
             
-            // Remove from DOM after it's hidden
             toast.addEventListener('hidden.bs.toast', () => {
                 document.body.removeChild(toast);
             });
         }
     }
     
-    function updateFeedStatus(message, type) {
-        const statusDiv = document.getElementById('feed-status');
-        const statusText = document.getElementById('feed-status-text');
+    function updateVideoStatus(message, type) {
+        const statusDiv = document.getElementById('video-status');
+        const statusText = document.getElementById('video-status-text');
         
         if (statusDiv && statusText) {
             statusDiv.className = `alert alert-${type} d-block`;
             statusText.textContent = message;
-            
-            // Auto-hide after 5 seconds
-            setTimeout(() => {
-                statusDiv.classList.add('d-none');
-            }, 5000);
         }
     }
     
@@ -347,16 +365,35 @@ document.addEventListener('DOMContentLoaded', function() {
             const diffMs = now - entryTime;
             const diffMins = Math.floor(diffMs / (1000 * 60));
             
-            // Calculate estimated cost based on duration (NPR)
+            // Calculate estimated cost
             let cost = 0;
             if (diffMins <= 60) {
-                cost = 50.0;  // Rs. 50 for first hour
+                cost = 50.0; // Rs. 50 for first hour
             } else {
                 const additionalHours = Math.ceil((diffMins - 60) / 60);
-                cost = 50.0 + (additionalHours * 30.0);  // Rs. 30 per additional hour
+                cost = 50.0 + (additionalHours * 30.0); // Rs. 30 per additional hour
             }
             
             counter.textContent = `Rs. ${cost.toFixed(2)}`;
         });
+    }
+    
+    function showAlert(message, type) {
+        const alertDiv = document.createElement('div');
+        alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
+        alertDiv.innerHTML = `
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        `;
+        
+        const container = document.querySelector('.container');
+        const heading = container.querySelector('.row');
+        container.insertBefore(alertDiv, heading.nextSibling);
+        
+        setTimeout(() => {
+            if (alertDiv.parentNode) {
+                alertDiv.remove();
+            }
+        }, 5000);
     }
 });

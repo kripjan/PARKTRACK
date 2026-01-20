@@ -1,57 +1,40 @@
 """
-Routes module - handles HTTP routing with minimal logic
-Business logic is delegated to service classes
+Routes module - Dashboard with video upload, separate Parking Spaces page, Video Processing for plate detection
 """
 import os
 import json
-from flask import render_template, request, redirect, url_for, flash, jsonify, send_from_directory, Response
+import glob
+from flask import render_template, request, redirect, url_for, flash, jsonify, send_from_directory
 from flask_socketio import emit
 from werkzeug.utils import secure_filename
-from datetime import datetime
-import cv2
-
 from app import app, socketio
 from services import DashboardService, VideoService, ReportService, ParkingSpaceService
 from parking_manager import ParkingManager
 
 # Initialize services
 dashboard_service = DashboardService()
-video_service = VideoService(app)  # Pass app instance
+video_service = VideoService()
 report_service = ReportService()
 parking_space_service = ParkingSpaceService(app.config['UPLOAD_FOLDER'])
 parking_manager = ParkingManager()
 
-# Global variable for video capture
-video_capture_instance = None
-
 
 # ============================================================================
-# DASHBOARD ROUTES
+# DASHBOARD ROUTES (with Video Upload for vehicle detection)
 # ============================================================================
 
 @app.route('/')
 def dashboard():
-    """Main dashboard with real-time parking status"""
+    """Main dashboard with real-time parking status and video upload"""
     data = dashboard_service.get_dashboard_data()
     return render_template('dashboard.html', **data)
 
 
-# ============================================================================
-# VIDEO PROCESSING ROUTES
-# ============================================================================
-
-@app.route('/video_upload')
-def video_upload():
-    """Video upload and processing page"""
-    return render_template('video_upload.html')
-
-
 @app.route('/upload_video', methods=['POST'])
 def upload_video():
-    """Handle video file upload and start processing"""
+    """Handle video file upload from dashboard and start parking detection"""
     if 'video' not in request.files:
-        flash('No video file selected', 'error')
-        return redirect(request.url)
+        return jsonify({'success': False, 'message': 'No video file selected'}), 400
     
     file = request.files['video']
     
@@ -59,120 +42,30 @@ def upload_video():
     success, message, filepath = video_service.save_video_file(file, app.config['UPLOAD_FOLDER'])
     
     if not success:
-        flash(message, 'error')
-        return redirect(request.url)
+        return jsonify({'success': False, 'message': message}), 400
     
-    # Start processing
-    success, message = video_service.process_video_file(filepath)
-    
-    if success:
-        flash('Video uploaded successfully and processing started', 'success')
-        return redirect(url_for('dashboard'))
-    else:
-        flash(f'Error starting video processing: {message}', 'error')
-        return redirect(request.url)
-
-
-@app.route('/start_live_feed', methods=['POST'])
-def start_live_feed():
-    """Start processing live video feed"""
-    camera_index = request.form.get('camera_index', 0, type=int)
-    
-    success, message = video_service.start_live_feed(camera_index)
+    # Start processing for PARKING DETECTION (not plates)
+    success, message = video_service.process_video_file(filepath, mode='parking')
     
     if success:
-        flash(message, 'success')
+        return jsonify({
+            'success': True,
+            'message': 'Video uploaded successfully and parking detection started',
+            'filepath': filepath
+        })
     else:
-        flash(message, 'error')
-    
-    return redirect(url_for('dashboard'))
+        return jsonify({'success': False, 'message': f'Error: {message}'}), 500
 
 
-@app.route('/stop_live_feed', methods=['POST'])
-def stop_live_feed():
-    """Stop processing live video feed"""
-    global video_capture_instance
-    
-    success, message = video_service.stop_live_feed()
-    
-    # Also release the video capture for streaming
-    if video_capture_instance is not None:
-        video_capture_instance.release()
-        video_capture_instance = None
-    
-    if success:
-        flash(message, 'success')
-    else:
-        flash(message, 'error')
-    
-    return redirect(url_for('dashboard'))
-
-
-@app.route('/video_feed')
-def video_feed():
-    """Video streaming route - returns MJPEG stream"""
-    return Response(generate_frames(),
-                    mimetype='multipart/x-mixed-replace; boundary=frame')
-
-
-def generate_frames():
-    """Generate frames from the webcam for streaming"""
-    global video_capture_instance
-    
-    # Get camera index from form or use default
-    camera_index = 0
-    
-    if video_capture_instance is None or not video_capture_instance.isOpened():
-        video_capture_instance = cv2.VideoCapture(camera_index)
-    
-    try:
-        while True:
-            success, frame = video_capture_instance.read()
-            if not success:
-                break
-            
-            # Draw overlays on frame
-            processed_frame = draw_detections(frame)
-            
-            # Encode frame as JPEG
-            ret, buffer = cv2.imencode('.jpg', processed_frame)
-            frame_bytes = buffer.tobytes()
-            
-            # Yield frame in byte format for MJPEG stream
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-    except GeneratorExit:
-        # Client disconnected
-        pass
-    except Exception as e:
-        print(f"Error in generate_frames: {e}")
-
-
-def draw_detections(frame):
-    """Draw detection overlays on frame"""
-    try:
-        # Add timestamp
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        cv2.putText(frame, timestamp, (10, 30), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        
-        # Add processing status
-        status = "PROCESSING" if video_service.is_processing() else "IDLE"
-        cv2.putText(frame, f"Status: {status}", (10, 60), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        
-        # Add system info
-        cv2.putText(frame, "Smart Parking System", (10, frame.shape[0] - 20), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        
-    except Exception as e:
-        print(f"Error drawing detections: {e}")
-    
-    return frame
+@app.route('/api/parking_statistics')
+def api_parking_statistics():
+    """API endpoint for parking statistics"""
+    stats = dashboard_service.get_parking_statistics()
+    return jsonify(stats)
 
 
 # ============================================================================
-# ROI CONFIGURATION ROUTES
+# PARKING SPACES ROUTES (ROI Configuration)
 # ============================================================================
 
 @app.route('/parking_spaces')
@@ -242,7 +135,6 @@ def upload_cctv_frame():
 def generate_roi_preview():
     """Generate preview image with ROI overlays"""
     try:
-        # Generate preview
         success, message, preview_path = parking_space_service.generate_preview()
         
         if success:
@@ -268,16 +160,6 @@ def get_roi_preview():
         return jsonify({'error': 'Preview not found'}), 404
 
 
-@app.route('/cctv_frame')
-def get_cctv_frame():
-    """Serve the uploaded CCTV frame"""
-    frame_file = os.path.join(app.config['UPLOAD_FOLDER'], 'cctv_frame.jpg')
-    if os.path.exists(frame_file):
-        return send_from_directory(app.config['UPLOAD_FOLDER'], 'cctv_frame.jpg')
-    else:
-        return jsonify({'error': 'Frame not found'}), 404
-
-
 @app.route('/api/roi_summary')
 def api_roi_summary():
     """API endpoint for ROI configuration summary"""
@@ -285,30 +167,76 @@ def api_roi_summary():
     return jsonify(summary)
 
 
-@app.route('/delete_roi_config', methods=['DELETE'])
-def delete_roi_config():
-    """Delete ROI configuration and associated files"""
-    success, message = parking_space_service.delete_config()
+# ============================================================================
+# VIDEO PROCESSING ROUTES (License Plate Detection & OCR)
+# ============================================================================
+
+@app.route('/video_upload')
+def video_upload():
+    """Video upload page for license plate detection"""
+    return render_template('video_upload.html')
+
+
+@app.route('/upload_video_for_plates', methods=['POST'])
+def upload_video_for_plates():
+    """Handle video file upload for LICENSE PLATE detection (not parking)"""
+    if 'video' not in request.files:
+        return jsonify({'success': False, 'message': 'No video file selected'}), 400
     
-    if success:
-        return jsonify({'success': True, 'message': message})
-    else:
+    file = request.files['video']
+    
+    # Save video file
+    success, message, filepath = video_service.save_video_file(file, app.config['UPLOAD_FOLDER'])
+    
+    if not success:
         return jsonify({'success': False, 'message': message}), 400
-
-
-@app.route('/export_roi_config')
-def export_roi_config():
-    """Export ROI configuration as JSON"""
-    success, config_json, message = parking_space_service.export_config()
+    
+    # Start processing for LICENSE PLATE detection
+    success, message = video_service.process_video_file(filepath, mode='plates')
     
     if success:
         return jsonify({
             'success': True,
-            'config': json.loads(config_json),
-            'message': message
+            'message': 'Video uploaded successfully and license plate detection started',
+            'filepath': filepath
         })
     else:
-        return jsonify({'success': False, 'message': message}), 400
+        return jsonify({'success': False, 'message': f'Error: {message}'}), 500
+
+
+@app.route('/api/processing_status')
+def api_processing_status():
+    """Get current video processing status"""
+    status = video_service.get_processing_status()
+    return jsonify(status)
+
+
+@app.route('/api/detected_plates')
+def api_detected_plates():
+    """Get list of detected license plates from current session"""
+    plates = video_service.get_detected_plates()
+    return jsonify({'plates': plates})
+
+
+@app.route('/api/plate_image/<int:plate_id>')
+def api_plate_image(plate_id):
+    """Serve cropped license plate image"""
+    plate_folder = os.path.join(app.config['UPLOAD_FOLDER'], 'detected_plates')
+    
+    # Find the file matching the plate_id (it may have a frame number suffix)
+    pattern = os.path.join(plate_folder, f'plate_{plate_id}_*.jpg')
+    matching_files = glob.glob(pattern)
+    
+    if matching_files:
+        filename = os.path.basename(matching_files[0])
+        return send_from_directory(plate_folder, filename)
+    else:
+        # Try without frame number suffix
+        filename = f'plate_{plate_id}.jpg'
+        if os.path.exists(os.path.join(plate_folder, filename)):
+            return send_from_directory(plate_folder, filename)
+        
+        return jsonify({'error': 'Plate image not found'}), 404
 
 
 # ============================================================================
@@ -318,7 +246,6 @@ def export_roi_config():
 @app.route('/reports')
 def reports():
     """Reports and analytics page"""
-    # Get report data
     daily_revenue = report_service.get_daily_revenue(days=7)
     hourly_occupancy = report_service.get_hourly_occupancy()
     top_vehicles = report_service.get_top_vehicles(limit=10)
@@ -335,21 +262,6 @@ def api_revenue_summary():
     days = request.args.get('days', 7, type=int)
     summary = report_service.get_revenue_summary(days)
     return jsonify(summary)
-
-
-@app.route('/api/vehicle_statistics')
-def api_vehicle_statistics():
-    """API endpoint for vehicle statistics"""
-    stats = report_service.get_vehicle_statistics()
-    return jsonify(stats)
-
-
-@app.route('/api/detection_statistics')
-def api_detection_statistics():
-    """API endpoint for detection statistics"""
-    days = request.args.get('days', 7, type=int)
-    stats = report_service.get_detection_statistics(days)
-    return jsonify(stats)
 
 
 # ============================================================================
@@ -379,10 +291,15 @@ def broadcast_detection(detection_data):
     socketio.emit('new_detection', detection_data)
 
 
+def broadcast_plate_detection(plate_data):
+    """Broadcast license plate detection"""
+    socketio.emit('plate_detected', plate_data)
+
+
 # ============================================================================
 # INITIALIZATION
 # ============================================================================
 
-# Set broadcast functions for video service and parking manager
-video_service.set_broadcast_functions(broadcast_parking_update, broadcast_detection)
+# Set broadcast functions
+video_service.set_broadcast_functions(broadcast_parking_update, broadcast_detection, broadcast_plate_detection)
 parking_manager.set_broadcast_function(broadcast_parking_update)

@@ -1,5 +1,5 @@
 """
-Video service - handles all business logic for video processing
+Video service - License Plate Detection, Cropping, and OCR
 """
 import os
 import logging
@@ -8,31 +8,28 @@ from video_processor import VideoProcessor
 
 
 class VideoService:
-    """Service class for video processing operations"""
+    """Service class for video processing operations focused on license plate detection"""
     
     ALLOWED_EXTENSIONS = {'mp4', 'avi', 'mov', 'mkv'}
     
-    def __init__(self, app=None):
+    def __init__(self):
         self.logger = logging.getLogger(__name__)
-        self.video_processor = VideoProcessor(app)
-        self.app = app
+        self.video_processor = VideoProcessor()
+        self.detected_plates = []
     
-    def set_app(self, app):
-        """Set Flask app instance"""
-        self.app = app
-        self.video_processor.set_app(app)
-    
-    def set_broadcast_functions(self, broadcast_parking_update, broadcast_detection):
+    def set_broadcast_functions(self, broadcast_parking_update, broadcast_detection, broadcast_plate_detection):
         """
         Set broadcast functions for real-time updates
         
         Args:
             broadcast_parking_update: Function to broadcast parking updates
             broadcast_detection: Function to broadcast detection updates
+            broadcast_plate_detection: Function to broadcast plate detections
         """
         self.video_processor.set_broadcast_functions(
             broadcast_parking_update,
-            broadcast_detection
+            broadcast_detection,
+            broadcast_plate_detection
         )
     
     def is_allowed_file(self, filename):
@@ -92,6 +89,10 @@ class VideoService:
             # Ensure upload folder exists
             os.makedirs(upload_folder, exist_ok=True)
             
+            # Ensure detected plates folder exists
+            plates_folder = os.path.join(upload_folder, 'detected_plates')
+            os.makedirs(plates_folder, exist_ok=True)
+            
             # Save file
             filepath = os.path.join(upload_folder, filename)
             file.save(filepath)
@@ -103,12 +104,13 @@ class VideoService:
             self.logger.error(f"Error saving video file: {e}")
             return False, str(e), None
     
-    def process_video_file(self, filepath):
+    def process_video_file(self, filepath, mode='parking'):
         """
         Start processing a video file
         
         Args:
             filepath (str): Path to video file
+            mode (str): 'parking' for parking detection, 'plates' for license plate detection
             
         Returns:
             tuple: (success: bool, message: str)
@@ -117,57 +119,18 @@ class VideoService:
             if not os.path.exists(filepath):
                 return False, f"Video file not found: {filepath}"
             
-            # Start video processing in background
-            self.video_processor.process_video_file(filepath)
+            # Clear previous detections
+            self.detected_plates = []
             
-            self.logger.info(f"Started processing video: {filepath}")
-            return True, "Video processing started successfully"
+            # Start video processing in background with specified mode
+            self.video_processor.process_video_file(filepath, mode=mode)
+            
+            mode_text = "parking space detection" if mode == 'parking' else "license plate detection"
+            self.logger.info(f"Started processing video for {mode_text}: {filepath}")
+            return True, f"Video processing started successfully ({mode_text})"
             
         except Exception as e:
             self.logger.error(f"Error starting video processing: {e}")
-            return False, str(e)
-    
-    def start_live_feed(self, camera_index=0):
-        """
-        Start processing live video feed from camera
-        
-        Args:
-            camera_index (int): Camera device index (default: 0)
-            
-        Returns:
-            tuple: (success: bool, message: str)
-        """
-        try:
-            if self.video_processor.is_processing:
-                return False, "Video processing already in progress"
-            
-            self.video_processor.start_live_processing(camera_index)
-            
-            self.logger.info(f"Started live feed from camera {camera_index}")
-            return True, f"Live feed started from camera {camera_index}"
-            
-        except Exception as e:
-            self.logger.error(f"Error starting live feed: {e}")
-            return False, str(e)
-    
-    def stop_live_feed(self):
-        """
-        Stop processing live video feed
-        
-        Returns:
-            tuple: (success: bool, message: str)
-        """
-        try:
-            if not self.video_processor.is_processing:
-                return False, "No live feed currently processing"
-            
-            self.video_processor.stop_live_processing()
-            
-            self.logger.info("Stopped live feed processing")
-            return True, "Live feed processing stopped"
-            
-        except Exception as e:
-            self.logger.error(f"Error stopping live feed: {e}")
             return False, str(e)
     
     def is_processing(self):
@@ -188,5 +151,49 @@ class VideoService:
         """
         return {
             'is_processing': self.video_processor.is_processing,
-            'vehicle_tracks': len(self.video_processor.vehicle_tracks) if hasattr(self.video_processor, 'vehicle_tracks') else 0
+            'plates_detected': len(self.detected_plates),
+            'current_frame': getattr(self.video_processor, 'current_frame', 0)
         }
+    
+    def get_detected_plates(self):
+        """
+        Get list of detected license plates
+        
+        Returns:
+            list: List of detected plate dictionaries
+        """
+        return self.detected_plates
+    
+    def add_detected_plate(self, plate_data):
+        """
+        Add a detected plate to the list
+        
+        Args:
+            plate_data (dict): Plate detection data
+        """
+        self.detected_plates.append(plate_data)
+        self.logger.info(f"Added detected plate: {plate_data.get('plate_number', 'Unknown')}")
+    
+    def export_detected_plates_csv(self):
+        """
+        Export detected plates to CSV format
+        
+        Returns:
+            str: CSV formatted string
+        """
+        import csv
+        import io
+        
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=['plate_number', 'confidence', 'frame', 'timestamp'])
+        
+        writer.writeheader()
+        for plate in self.detected_plates:
+            writer.writerow({
+                'plate_number': plate.get('plate_number', 'Unknown'),
+                'confidence': plate.get('confidence', 0),
+                'frame': plate.get('frame', 0),
+                'timestamp': plate.get('timestamp', '')
+            })
+        
+        return output.getvalue()

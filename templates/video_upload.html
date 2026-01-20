@@ -1,15 +1,15 @@
 {% extends "base.html" %}
 
-{% block title %}Video Processing - Smart Parking System{% endblock %}
+{% block title %}License Plate Detection - Smart Parking System{% endblock %}
 
 {% block content %}
 <div class="row mb-4">
     <div class="col-12">
         <h1 class="h2 mb-0">
             <i class="bi bi-camera-video me-2"></i>
-            Video Processing
+            License Plate Detection & OCR
         </h1>
-        <p class="text-muted">Upload and process video files for vehicle detection and license plate recognition</p>
+        <p class="text-muted">Upload video files for automated license plate detection, cropping, and text recognition</p>
     </div>
 </div>
 
@@ -24,7 +24,7 @@
                 </h5>
             </div>
             <div class="card-body">
-                <form action="{{ url_for('upload_video') }}" method="post" enctype="multipart/form-data" id="uploadForm">
+                <form id="uploadForm" enctype="multipart/form-data">
                     <div class="mb-3">
                         <label for="video" class="form-label">Select Video File</label>
                         <input type="file" class="form-control" id="video" name="video" accept=".mp4,.avi,.mov,.mkv" required>
@@ -34,23 +34,17 @@
                     </div>
                     
                     <div class="mb-3">
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="processLicensePlates" checked>
-                            <label class="form-check-label" for="processLicensePlates">
-                                Enable license plate recognition
-                            </label>
-                        </div>
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="trackVehicles" checked>
-                            <label class="form-check-label" for="trackVehicles">
-                                Enable vehicle tracking
-                            </label>
-                        </div>
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="calculateTolls" checked>
-                            <label class="form-check-label" for="calculateTolls">
-                                Automatically calculate parking tolls
-                            </label>
+                        <div class="card bg-dark">
+                            <div class="card-body">
+                                <h6 class="text-white-50 mb-2">Processing Features:</h6>
+                                <ul class="text-white-50 mb-0" style="font-size: 0.875rem;">
+                                    <li>Automatic license plate detection using YOLO</li>
+                                    <li>License plate cropping and image extraction</li>
+                                    <li>OCR (Optical Character Recognition) for text extraction</li>
+                                    <li>Real-time progress tracking</li>
+                                    <li>Downloadable results with plate images</li>
+                                </ul>
+                            </div>
                         </div>
                     </div>
                     
@@ -94,35 +88,27 @@
                     </div>
                     
                     <div class="row text-center">
-                        <div class="col-md-3">
+                        <div class="col-md-4">
                             <div class="card bg-light">
                                 <div class="card-body">
-                                    <h4 class="text-primary mb-1" id="vehicles-detected">0</h4>
-                                    <small class="text-muted">Vehicles Detected</small>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="card bg-light">
-                                <div class="card-body">
-                                    <h4 class="text-success mb-1" id="plates-recognized">0</h4>
-                                    <small class="text-muted">License Plates</small>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="card bg-light">
-                                <div class="card-body">
-                                    <h4 class="text-warning mb-1" id="sessions-created">0</h4>
-                                    <small class="text-muted">Parking Sessions</small>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="card bg-light">
-                                <div class="card-body">
-                                    <h4 class="text-info mb-1" id="frames-processed">0</h4>
+                                    <h4 class="text-primary mb-1" id="frames-processed">0</h4>
                                     <small class="text-muted">Frames Processed</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card bg-light">
+                                <div class="card-body">
+                                    <h4 class="text-success mb-1" id="plates-detected">0</h4>
+                                    <small class="text-muted">Plates Detected</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card bg-light">
+                                <div class="card-body">
+                                    <h4 class="text-info mb-1" id="plates-recognized">0</h4>
+                                    <small class="text-muted">Plates Recognized (OCR)</small>
                                 </div>
                             </div>
                         </div>
@@ -133,39 +119,32 @@
     </div>
 </div>
 
-<!-- Recent Uploads -->
+<!-- Detected License Plates -->
 <div class="row">
     <div class="col-12">
         <div class="card">
-            <div class="card-header">
+            <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="card-title mb-0">
-                    <i class="bi bi-clock-history me-2"></i>
-                    Processing History
+                    <i class="bi bi-collection me-2"></i>
+                    Detected License Plates
                 </h5>
+                <button class="btn btn-sm btn-outline-primary" id="export-results-btn" disabled>
+                    <i class="bi bi-download me-1"></i>
+                    Export Results
+                </button>
             </div>
             <div class="card-body">
-                <div class="table-responsive">
-                    <table class="table table-hover">
-                        <thead>
-                            <tr>
-                                <th>File Name</th>
-                                <th>Upload Time</th>
-                                <th>Duration</th>
-                                <th>Vehicles Detected</th>
-                                <th>License Plates</th>
-                                <th>Status</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="processing-history">
-                            <tr>
-                                <td colspan="7" class="text-center text-muted py-4">
-                                    <i class="bi bi-folder-x" style="font-size: 2rem;"></i>
-                                    <p class="mt-2">No video processing history available</p>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
+                <div id="detected-plates-container">
+                    <div class="text-center text-muted py-4">
+                        <i class="bi bi-credit-card" style="font-size: 3rem;"></i>
+                        <p class="mt-2">No license plates detected yet</p>
+                        <small>Upload and process a video to see results here</small>
+                    </div>
+                </div>
+                
+                <!-- Results Grid (populated dynamically) -->
+                <div id="plates-grid" class="row g-3" style="display: none;">
+                    <!-- Plate cards will be inserted here via JavaScript -->
                 </div>
             </div>
         </div>
@@ -195,6 +174,56 @@
                     </div>
                 </div>
                 <small class="text-muted mt-2">This may take a few minutes depending on file size</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Plate Detail Modal -->
+<div class="modal fade" id="plateDetailModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="bi bi-zoom-in me-2"></i>
+                    License Plate Details
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <img id="modal-plate-image" class="img-fluid rounded border" alt="License Plate">
+                    </div>
+                    <div class="col-md-6">
+                        <h6>Detection Information</h6>
+                        <table class="table table-sm">
+                            <tr>
+                                <th>Plate Number:</th>
+                                <td id="modal-plate-number">-</td>
+                            </tr>
+                            <tr>
+                                <th>Confidence:</th>
+                                <td id="modal-confidence">-</td>
+                            </tr>
+                            <tr>
+                                <th>Frame:</th>
+                                <td id="modal-frame">-</td>
+                            </tr>
+                            <tr>
+                                <th>Timestamp:</th>
+                                <td id="modal-timestamp">-</td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-primary" id="download-plate-btn">
+                    <i class="bi bi-download me-1"></i>
+                    Download Image
+                </button>
             </div>
         </div>
     </div>
