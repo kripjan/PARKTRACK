@@ -60,27 +60,35 @@ class LicensePlateDetector:
             return None
     
     def _use_trained_model(self, vehicle_image):
-        """Use trained YOLO model for license plate detection"""
         try:
-            results = self.model(vehicle_image, verbose=False)
-            
-            for result in results:
-                boxes = result.boxes
-                if boxes is not None:
-                    for box in boxes:
-                        confidence = float(box.conf[0])
-                        if confidence > 0.5:  # Confidence threshold
-                            x1, y1, x2, y2 = box.xyxy[0].tolist()
-                            
-                            # Extract license plate region
-                            lp_roi = vehicle_image[int(y1):int(y2), int(x1):int(x2)]
-                            
-                            # Apply OCR or text recognition
-                            license_text = self._extract_text_from_plate(lp_roi)
-                            if license_text:
-                                return license_text
-            
+            results = self.model(vehicle_image, conf=0.5, verbose=False)
+
+            if len(results) == 0:
+                return None
+
+            r = results[0]  # first image result
+
+            if r.boxes is None or len(r.boxes) == 0:
+                return None
+
+            for box in r.boxes.xyxy:  # tensor of [x1,y1,x2,y2]
+                x1, y1, x2, y2 = map(int, box.tolist())
+
+                lp_roi = vehicle_image[y1:y2, x1:x2]
+
+                if lp_roi.size == 0:
+                    continue
+
+                license_text = self._extract_text_from_plate(lp_roi)
+                if license_text:
+                    return license_text
+
             return None
+
+        except Exception as e:
+            self.logger.error(f"Error using trained model: {e}")
+            return None
+
             
         except Exception as e:
             self.logger.error(f"Error using trained model: {e}")

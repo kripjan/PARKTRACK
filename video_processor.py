@@ -2,6 +2,7 @@ import threading
 import time
 import logging
 import os
+import base64
 from datetime import datetime
 try:
     import cv2
@@ -34,7 +35,7 @@ class VideoProcessor:
         # Initialize YOLO model for vehicle detection (for plate detection mode)
         if CV_AVAILABLE:
             try:
-                self.yolo_model = YOLO('model\\yolov8s.pt')
+                self.yolo_model = YOLO('model/yolov8s.pt')
                 self.logger.info("YOLO model loaded successfully")
             except Exception as e:
                 self.logger.error(f"Failed to load YOLO model: {e}")
@@ -114,7 +115,7 @@ class VideoProcessor:
             self._process_video_plates(filepath)
     
     def _process_video_parking(self, filepath):
-        """Process video for parking space occupancy detection"""
+        """Process video for parking space occupancy detection with live streaming"""
         if not self.parking_detector.is_configured():
             self.logger.error("Parking detector not configured. Please upload configuration files first.")
             self.is_processing = False
@@ -168,6 +169,7 @@ class VideoProcessor:
         
         frame_count = 0
         frame_skip = 2  # Process every 2nd frame
+        stream_every = 5  # Stream every 5th processed frame to avoid overwhelming the browser
         
         try:
             while self.is_processing and frame_count < self.total_frames:
@@ -189,13 +191,17 @@ class VideoProcessor:
                     if slot_status:
                         self._update_parking_spaces_from_slots(slot_status)
                     
-                    # Broadcast update
+                    # Stream frames to frontend
+                    if frame_count % stream_every == 0 and self.broadcast_detection:
+                        self._stream_parking_frames(processed_frame, schematic, slot_status)
+                    
+                    # Broadcast statistics update
                     if slot_status and self.broadcast_detection:
                         occupied = sum(slot_status)
                         available = len(slot_status) - occupied
                         
                         self.broadcast_detection({
-                            'type': 'parking_status',
+                            'type': 'parking_stats_update',
                             'occupied': occupied,
                             'available': available,
                             'total': len(slot_status),
@@ -223,10 +229,43 @@ class VideoProcessor:
             self.is_processing = False
             
             # Broadcast completion
-            self._broadcast_completion(frame_count)
+            self._broadcast_completion(frame_count, output_path)
             
             self.logger.info(f"Parking video processing completed: {frame_count} frames processed")
             self.logger.info(f"Output saved to: {output_path}")
+    
+    def _stream_parking_frames(self, camera_view, schematic_view, slot_status):
+        """Stream current frames to frontend via WebSocket"""
+        try:
+            # Encode camera view to base64
+            _, camera_buffer = cv2.imencode('.jpg', camera_view, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            camera_base64 = base64.b64encode(camera_buffer).decode('utf-8')
+            
+            # Encode schematic view to base64
+            _, schematic_buffer = cv2.imencode('.jpg', schematic_view, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            schematic_base64 = base64.b64encode(schematic_buffer).decode('utf-8')
+            
+            # Calculate statistics
+            occupied = sum(slot_status) if slot_status else 0
+            total = len(slot_status) if slot_status else 0
+            available = total - occupied
+            
+            # Broadcast frames
+            if self.broadcast_detection:
+                self.broadcast_detection({
+                    'type': 'live_frame',
+                    'camera_frame': camera_base64,
+                    'schematic_frame': schematic_base64,
+                    'stats': {
+                        'total': total,
+                        'occupied': occupied,
+                        'available': available
+                    },
+                    'timestamp': datetime.utcnow().isoformat()
+                })
+                
+        except Exception as e:
+            self.logger.error(f"Error streaming frames: {e}")
     
     def _process_video_plates(self, filepath):
         """Process video for license plate detection (original logic)"""
@@ -406,76 +445,20 @@ class VideoProcessor:
                 'plates_recognized': self.plates_recognized
             })
     
-    def _broadcast_completion(self, total_frames):
+    def _broadcast_completion(self, total_frames, output_path=None):
         """Broadcast processing completion"""
         if self.broadcast_detection:
-            self.broadcast_detection({
+            completion_data = {
                 'type': 'processing_complete',
                 'total_frames': total_frames,
                 'plates_detected': self.plates_detected,
                 'plates_recognized': self.plates_recognized
-            })
-    
-    def _mock_video_processing(self, filepath):
-        """Mock video processing for demonstration"""
-        import os
-        import random
-        
-        self.logger.info(f"Starting mock processing of {os.path.basename(filepath)}")
-        
-        self.total_frames = 100
-        frame_count = 0
-        
-        while self.is_processing and frame_count < self.total_frames:
-            self.current_frame = frame_count
+            }
             
-            # Simulate detection
-            if random.random() < 0.15:
-                self._mock_detect_plate(frame_count)
+            if output_path:
+                completion_data['output_video'] = os.path.basename(output_path)
             
-            frame_count += 1
-            
-            if frame_count % 10 == 0:
-                progress = (frame_count / self.total_frames) * 100
-                self._broadcast_progress(progress, frame_count)
-            
-            time.sleep(0.1)
-        
-        self.is_processing = False
-        self._broadcast_completion(frame_count)
-        self.logger.info(f"Mock video processing completed: {frame_count} frames processed")
-    
-    def _mock_detect_plate(self, frame_number):
-        """Mock plate detection"""
-        import random
-        
-        mock_plates = ["ABC123", "XYZ789", "DEF456", "GHI012", "JKL345"]
-        license_plate_text = random.choice(mock_plates)
-        
-        self.plates_detected += 1
-        is_recognized = random.random() < 0.8
-        
-        if not is_recognized:
-            license_plate_text = None
-        else:
-            self.plates_recognized += 1
-        
-        plate_data = {
-            'plate_number': license_plate_text or 'Unrecognized',
-            'confidence': random.uniform(0.7, 0.95),
-            'frame': frame_number,
-            'timestamp': datetime.utcnow().isoformat(),
-            'image_url': None,
-            'image_path': None
-        }
-        
-        self.detected_plates.append(plate_data)
-        
-        if self.broadcast_plate_detection:
-            self.broadcast_plate_detection(plate_data)
-        
-        if is_recognized and license_plate_text:
-            self.parking_manager.handle_vehicle_detection(license_plate_text)
+            self.broadcast_detection(completion_data)
     
     def get_detected_plates(self):
         """Get list of detected plates"""

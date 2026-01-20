@@ -1,4 +1,4 @@
-// Dashboard JavaScript for Smart Parking System
+// Dashboard JavaScript for Smart Parking System - Live Video Processing
 document.addEventListener('DOMContentLoaded', function() {
     // Initialize Socket.IO connection
     const socket = io();
@@ -10,22 +10,23 @@ document.addEventListener('DOMContentLoaded', function() {
     const uploadModal = new bootstrap.Modal(document.getElementById('uploadModal'));
     const uploadProgressBar = document.getElementById('upload-progress-bar');
     
-    // Chart configuration
-    let detectionChart;
-    const chartData = {
-        labels: [],
-        datasets: [{
-            label: 'Vehicle Count',
-            data: [],
-            borderColor: 'rgb(13, 110, 253)',
-            backgroundColor: 'rgba(13, 110, 253, 0.1)',
-            tension: 0.4,
-            fill: true
-        }]
-    };
+    // Live processing elements
+    const liveProcessingContainer = document.getElementById('live-processing-container');
+    const cameraFrame = document.getElementById('camera-frame');
+    const schematicFrame = document.getElementById('schematic-frame');
+    const cameraPlaceholder = document.getElementById('camera-placeholder');
+    const schematicPlaceholder = document.getElementById('schematic-placeholder');
+    const processingProgress = document.getElementById('processing-progress');
+    const progressText = document.getElementById('progress-text');
+    const framesProcessedLive = document.getElementById('frames-processed-live');
+    const occupiedLive = document.getElementById('occupied-live');
+    const availableLive = document.getElementById('available-live');
+    const downloadOutputBtn = document.getElementById('download-output-btn');
     
-    // Initialize real-time chart
-    initializeChart();
+    let outputVideoFilename = null;
+    
+    // Check parking configuration on page load
+    checkParkingConfiguration();
     
     // Duration and cost counters
     updateDurationCounters();
@@ -75,6 +76,9 @@ document.addEventListener('DOMContentLoaded', function() {
                         showAlert('Video uploaded successfully! Processing started...', 'success');
                         videoUploadForm.reset();
                         updateVideoStatus('Processing video...', 'info');
+                        
+                        // Show live processing container
+                        showLiveProcessing();
                     } else {
                         showAlert(response.message || 'Error uploading video', 'danger');
                     }
@@ -113,46 +117,166 @@ document.addEventListener('DOMContentLoaded', function() {
         handleNewDetection(data);
     });
     
-    function initializeChart() {
-        const ctx = document.getElementById('detectionChart');
-        if (!ctx) return;
-        
-        detectionChart = new Chart(ctx.getContext('2d'), {
-            type: 'line',
-            data: chartData,
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    title: {
-                        display: true,
-                        text: 'Real-time Vehicle Detection'
-                    },
-                    legend: {
-                        display: false
-                    }
-                },
-                scales: {
-                    x: {
-                        type: 'category',
-                        title: {
-                            display: true,
-                            text: 'Time'
-                        }
-                    },
-                    y: {
-                        beginAtZero: true,
-                        title: {
-                            display: true,
-                            text: 'Vehicle Count'
-                        }
-                    }
-                },
-                animation: {
-                    duration: 0
+    function checkParkingConfiguration() {
+        fetch('/api/parking_config_status')
+            .then(response => response.json())
+            .then(data => {
+                if (!data.configured) {
+                    // Show warning alert
+                    document.getElementById('config-status-alert').style.display = 'block';
+                    
+                    // Disable upload button
+                    uploadVideoBtn.disabled = true;
+                    uploadVideoBtn.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i> Configuration Required';
+                    uploadVideoBtn.classList.remove('btn-success');
+                    uploadVideoBtn.classList.add('btn-warning');
+                } else {
+                    console.log(`Parking configuration loaded: ${data.slot_count} slots`);
+                    console.log(`Database has ${data.database_spaces} parking spaces`);
                 }
-            }
-        });
+            })
+            .catch(error => {
+                console.error('Error checking parking configuration:', error);
+            });
+    }
+    
+    function showLiveProcessing() {
+        liveProcessingContainer.style.display = 'block';
+        
+        // Reset progress
+        processingProgress.style.width = '0%';
+        progressText.textContent = '0%';
+        framesProcessedLive.textContent = '0';
+        occupiedLive.textContent = '0';
+        availableLive.textContent = '0';
+        
+        // Hide placeholders, show images
+        cameraPlaceholder.style.display = 'block';
+        schematicPlaceholder.style.display = 'block';
+        cameraFrame.style.display = 'none';
+        schematicFrame.style.display = 'none';
+        
+        // Hide download button
+        downloadOutputBtn.style.display = 'none';
+        outputVideoFilename = null;
+        
+        // Scroll to live view
+        liveProcessingContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    
+    function handleNewDetection(data) {
+        console.log('New detection:', data);
+        
+        // Handle live frames
+        if (data.type === 'live_frame') {
+            updateLiveFrames(data);
+        }
+        
+        // Handle parking stats update
+        else if (data.type === 'parking_stats_update') {
+            updateParkingStats(data);
+        }
+        
+        // Handle processing updates
+        else if (data.type === 'processing_update') {
+            updateProcessingProgress(data);
+        }
+        
+        // Handle completion
+        else if (data.type === 'processing_complete') {
+            handleProcessingComplete(data);
+        }
+        
+        // Handle errors
+        else if (data.type === 'error') {
+            showAlert(`Processing error: ${data.message}`, 'danger');
+            liveProcessingContainer.style.display = 'none';
+        }
+        
+        // Handle license plate detections (from plates mode)
+        else if (data.type === 'license_plate' || data.license_plate) {
+            addRecentActivity({
+                type: 'license_plate',
+                license_plate: data.license_plate,
+                timestamp: data.timestamp
+            });
+        }
+    }
+    
+    function updateLiveFrames(data) {
+        // Update camera view
+        if (data.camera_frame) {
+            cameraFrame.src = 'data:image/jpeg;base64,' + data.camera_frame;
+            cameraFrame.style.display = 'block';
+            cameraPlaceholder.style.display = 'none';
+        }
+        
+        // Update schematic view
+        if (data.schematic_frame) {
+            schematicFrame.src = 'data:image/jpeg;base64,' + data.schematic_frame;
+            schematicFrame.style.display = 'block';
+            schematicPlaceholder.style.display = 'none';
+        }
+        
+        // Update live stats
+        if (data.stats) {
+            occupiedLive.textContent = data.stats.occupied;
+            availableLive.textContent = data.stats.available;
+            
+            // Also update main dashboard stats
+            document.getElementById('occupied-spaces').textContent = data.stats.occupied;
+            document.getElementById('available-spaces').textContent = data.stats.available;
+            document.getElementById('total-spaces').textContent = data.stats.total;
+        }
+    }
+    
+    function updateParkingStats(data) {
+        // Update live stats counters
+        if (data.occupied !== undefined) {
+            occupiedLive.textContent = data.occupied;
+            document.getElementById('occupied-spaces').textContent = data.occupied;
+        }
+        
+        if (data.available !== undefined) {
+            availableLive.textContent = data.available;
+            document.getElementById('available-spaces').textContent = data.available;
+        }
+        
+        if (data.total !== undefined) {
+            document.getElementById('total-spaces').textContent = data.total;
+        }
+    }
+    
+    function updateProcessingProgress(data) {
+        if (data.progress !== undefined) {
+            processingProgress.style.width = data.progress + '%';
+            progressText.textContent = data.progress.toFixed(1) + '%';
+        }
+        
+        if (data.frames_processed !== undefined) {
+            framesProcessedLive.textContent = data.frames_processed;
+        }
+    }
+    
+    function handleProcessingComplete(data) {
+        showAlert(`Processing complete! Processed ${data.total_frames} frames.`, 'success');
+        
+        // Update progress to 100%
+        processingProgress.style.width = '100%';
+        progressText.textContent = '100%';
+        processingProgress.classList.remove('progress-bar-animated');
+        
+        // Show download button if output video is available
+        if (data.output_video) {
+            outputVideoFilename = data.output_video;
+            downloadOutputBtn.style.display = 'inline-block';
+            downloadOutputBtn.onclick = function() {
+                window.location.href = `/download_processed_video/${outputVideoFilename}`;
+            };
+        }
+        
+        // Refresh statistics
+        updateStatistics();
     }
     
     function handleParkingUpdate(data) {
@@ -171,50 +295,6 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // Show notification
         showNotification(data);
-    }
-    
-    function handleNewDetection(data) {
-        console.log('New detection:', data);
-        
-        if (data.type === 'license_plate' || data.license_plate) {
-            addRecentActivity({
-                type: 'license_plate',
-                license_plate: data.license_plate,
-                timestamp: data.timestamp
-            });
-        }
-        
-        if (data.vehicle_count !== undefined) {
-            // Update real-time chart
-            updateChart(data.vehicle_count, data.timestamp);
-        }
-        
-        // Handle processing updates
-        if (data.type === 'processing_update') {
-            updateVideoStatus(`Processing: ${data.progress?.toFixed(1)}% - ${data.frames_processed} frames`, 'info');
-        } else if (data.type === 'processing_complete') {
-            updateVideoStatus('Processing complete!', 'success');
-            showAlert(`Video processing complete! Detected ${data.plates_detected || 0} vehicles.`, 'success');
-        }
-    }
-    
-    function updateChart(vehicleCount, timestamp) {
-        if (!detectionChart) return;
-        
-        const now = timestamp ? new Date(timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
-        
-        // Add new data point
-        chartData.labels.push(now);
-        chartData.datasets[0].data.push(vehicleCount);
-        
-        // Keep only last 50 data points
-        if (chartData.labels.length > 50) {
-            chartData.labels.shift();
-            chartData.datasets[0].data.shift();
-        }
-        
-        // Update chart
-        detectionChart.update('none');
     }
     
     function updateStatistics() {

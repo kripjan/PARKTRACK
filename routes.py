@@ -63,6 +63,47 @@ def api_parking_statistics():
     stats = dashboard_service.get_parking_statistics()
     return jsonify(stats)
 
+@app.route('/download_processed_video/<filename>')
+def download_processed_video(filename):
+    """Download processed parking video"""
+    from werkzeug.utils import secure_filename
+    from flask import send_from_directory
+    
+    safe_filename = secure_filename(filename)
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], safe_filename)
+    
+    if os.path.exists(filepath):
+        return send_from_directory(
+            app.config['UPLOAD_FOLDER'], 
+            safe_filename, 
+            as_attachment=True,
+            download_name=f'parking_output_{datetime.now().strftime("%Y%m%d_%H%M%S")}.mp4'
+        )
+    else:
+        return jsonify({'error': 'Video file not found'}), 404
+
+
+@app.route('/api/parking_config_status')
+def api_parking_config_status():
+    """Check if parking detection is properly configured"""
+    try:
+        is_configured = video_service.parking_detector.is_configured()
+        slot_count = video_service.parking_detector.get_slot_count()
+        
+        status = {
+            'configured': is_configured,
+            'slot_count': slot_count,
+            'has_homography': video_service.parking_detector.H is not None,
+            'has_slots': video_service.parking_detector.parking_slots is not None,
+            'database_spaces': ParkingSpace.query.count()
+        }
+        
+        return jsonify(status)
+    except Exception as e:
+        return jsonify({
+            'configured': False,
+            'error': str(e)
+        }), 500
 
 # ============================================================================
 # PARKING SPACES ROUTES (ROI Configuration)

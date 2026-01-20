@@ -13,6 +13,18 @@
     </div>
 </div>
 
+<!-- Configuration Status Alert -->
+<div class="row mb-4" id="config-status-alert" style="display: none;">
+    <div class="col-12">
+        <div class="alert alert-warning alert-dismissible fade show" role="alert">
+            <i class="bi bi-exclamation-triangle me-2"></i>
+            <strong>Parking Detection Not Configured!</strong> 
+            Please run <code>setup_parking_config.py</code> or upload configuration files before processing videos.
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    </div>
+</div>
+
 <!-- Video Upload Controls -->
 <div class="row mb-4">
     <div class="col-12">
@@ -30,7 +42,7 @@
                             <label for="video-file" class="form-label">Select Video File</label>
                             <input type="file" class="form-control" id="video-file" name="video" accept=".mp4,.avi,.mov,.mkv" required>
                             <div class="form-text">
-                                Upload video for vehicle detection and tracking (MP4, AVI, MOV, MKV - Max 100MB)
+                                Upload video for parking space detection and tracking (MP4, AVI, MOV, MKV - Max 100MB)
                             </div>
                         </div>
                         <div class="col-md-4 mb-3 d-flex align-items-end">
@@ -46,6 +58,119 @@
                         <div id="video-status" class="alert alert-info d-none" role="alert">
                             <i class="bi bi-info-circle me-2"></i>
                             <span id="video-status-text">Waiting for status update...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Live Video Processing Viewer -->
+<div class="row mb-4" id="live-processing-container" style="display: none;">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-broadcast me-2"></i>
+                    Live Processing View
+                </h5>
+                <div>
+                    <span class="badge bg-success me-2">
+                        <i class="bi bi-circle-fill" style="font-size: 0.5rem;"></i>
+                        LIVE
+                    </span>
+                    <button class="btn btn-sm btn-outline-primary" id="download-output-btn" style="display: none;">
+                        <i class="bi bi-download me-1"></i>
+                        Download Processed Video
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <!-- Progress Bar -->
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between mb-1">
+                        <small>Processing Progress</small>
+                        <small id="progress-text">0%</small>
+                    </div>
+                    <div class="progress">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" 
+                             id="processing-progress" 
+                             role="progressbar" 
+                             style="width: 0%">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Live Video Frames -->
+                <div class="row">
+                    <div class="col-lg-6 mb-3">
+                        <div class="card bg-dark">
+                            <div class="card-header">
+                                <h6 class="text-white mb-0">
+                                    <i class="bi bi-camera-video me-2"></i>
+                                    Camera View (Inference)
+                                </h6>
+                            </div>
+                            <div class="card-body p-0">
+                                <img id="camera-frame" 
+                                     class="img-fluid w-100" 
+                                     style="min-height: 300px; background: #000;"
+                                     alt="Camera view">
+                                <div id="camera-placeholder" class="text-center py-5 text-muted">
+                                    <i class="bi bi-camera-video" style="font-size: 3rem;"></i>
+                                    <p class="mt-2">Waiting for video frames...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-lg-6 mb-3">
+                        <div class="card bg-dark">
+                            <div class="card-header">
+                                <h6 class="text-white mb-0">
+                                    <i class="bi bi-diagram-3 me-2"></i>
+                                    Schematic View (Bird's-Eye)
+                                </h6>
+                            </div>
+                            <div class="card-body p-0">
+                                <img id="schematic-frame" 
+                                     class="img-fluid w-100" 
+                                     style="min-height: 300px; background: #fff;"
+                                     alt="Schematic view">
+                                <div id="schematic-placeholder" class="text-center py-5 text-muted">
+                                    <i class="bi bi-diagram-3" style="font-size: 3rem;"></i>
+                                    <p class="mt-2">Waiting for schematic...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Processing Stats -->
+                <div class="row text-center">
+                    <div class="col-md-4">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h4 class="text-primary mb-1" id="frames-processed-live">0</h4>
+                                <small class="text-muted">Frames Processed</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h4 class="text-danger mb-1" id="occupied-live">0</h4>
+                                <small class="text-muted">Occupied Spaces</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h4 class="text-success mb-1" id="available-live">0</h4>
+                                <small class="text-muted">Available Spaces</small>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -207,23 +332,6 @@
                     </div>
                     {% endfor %}
                 </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Real-time Vehicle Detection Chart -->
-<div class="row">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header">
-                <h5 class="card-title mb-0">
-                    <i class="bi bi-graph-up me-2"></i>
-                    Real-time Vehicle Detection
-                </h5>
-            </div>
-            <div class="card-body">
-                <canvas id="detectionChart" height="100"></canvas>
             </div>
         </div>
     </div>
