@@ -4,19 +4,25 @@ Business logic is delegated to service classes
 """
 import os
 import json
-from flask import render_template, request, redirect, url_for, flash, jsonify, send_from_directory
+from flask import render_template, request, redirect, url_for, flash, jsonify, send_from_directory, Response
 from flask_socketio import emit
 from werkzeug.utils import secure_filename
+from datetime import datetime
+import cv2
+
 from app import app, socketio
 from services import DashboardService, VideoService, ReportService, ParkingSpaceService
 from parking_manager import ParkingManager
 
 # Initialize services
 dashboard_service = DashboardService()
-video_service = VideoService()
+video_service = VideoService(app)  # Pass app instance
 report_service = ReportService()
 parking_space_service = ParkingSpaceService(app.config['UPLOAD_FOLDER'])
 parking_manager = ParkingManager()
+
+# Global variable for video capture
+video_capture_instance = None
 
 
 # ============================================================================
@@ -85,7 +91,14 @@ def start_live_feed():
 @app.route('/stop_live_feed', methods=['POST'])
 def stop_live_feed():
     """Stop processing live video feed"""
+    global video_capture_instance
+    
     success, message = video_service.stop_live_feed()
+    
+    # Also release the video capture for streaming
+    if video_capture_instance is not None:
+        video_capture_instance.release()
+        video_capture_instance = None
     
     if success:
         flash(message, 'success')
@@ -93,6 +106,69 @@ def stop_live_feed():
         flash(message, 'error')
     
     return redirect(url_for('dashboard'))
+
+
+@app.route('/video_feed')
+def video_feed():
+    """Video streaming route - returns MJPEG stream"""
+    return Response(generate_frames(),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+def generate_frames():
+    """Generate frames from the webcam for streaming"""
+    global video_capture_instance
+    
+    # Get camera index from form or use default
+    camera_index = 0
+    
+    if video_capture_instance is None or not video_capture_instance.isOpened():
+        video_capture_instance = cv2.VideoCapture(camera_index)
+    
+    try:
+        while True:
+            success, frame = video_capture_instance.read()
+            if not success:
+                break
+            
+            # Draw overlays on frame
+            processed_frame = draw_detections(frame)
+            
+            # Encode frame as JPEG
+            ret, buffer = cv2.imencode('.jpg', processed_frame)
+            frame_bytes = buffer.tobytes()
+            
+            # Yield frame in byte format for MJPEG stream
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+    except GeneratorExit:
+        # Client disconnected
+        pass
+    except Exception as e:
+        print(f"Error in generate_frames: {e}")
+
+
+def draw_detections(frame):
+    """Draw detection overlays on frame"""
+    try:
+        # Add timestamp
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cv2.putText(frame, timestamp, (10, 30), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        
+        # Add processing status
+        status = "PROCESSING" if video_service.is_processing() else "IDLE"
+        cv2.putText(frame, f"Status: {status}", (10, 60), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        
+        # Add system info
+        cv2.putText(frame, "Smart Parking System", (10, frame.shape[0] - 20), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        
+    except Exception as e:
+        print(f"Error drawing detections: {e}")
+    
+    return frame
 
 
 # ============================================================================

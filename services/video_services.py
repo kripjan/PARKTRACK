@@ -12,9 +12,15 @@ class VideoService:
     
     ALLOWED_EXTENSIONS = {'mp4', 'avi', 'mov', 'mkv'}
     
-    def __init__(self):
+    def __init__(self, app=None):
         self.logger = logging.getLogger(__name__)
-        self.video_processor = VideoProcessor()
+        self.video_processor = VideoProcessor(app)
+        self.app = app
+    
+    def set_app(self, app):
+        """Set Flask app instance"""
+        self.app = app
+        self.video_processor.set_app(app)
     
     def set_broadcast_functions(self, broadcast_parking_update, broadcast_detection):
         """

@@ -16,12 +16,13 @@ from license_plate_detector import LicensePlateDetector
 from parking_manager import ParkingManager
 
 class VideoProcessor:
-    def __init__(self):
+    def __init__(self, app=None):
         self.logger = logging.getLogger(__name__)
         self.is_processing = False
         self.current_thread = None
         self.broadcast_parking_update = None
         self.broadcast_detection = None
+        self.app = app  # Store Flask app instance
         
         # Initialize YOLO model for vehicle detection
         if CV_AVAILABLE:
@@ -45,6 +46,10 @@ class VideoProcessor:
         self.vehicle_tracks = {}
         self.next_track_id = 1
         self.tracking_threshold = 50  # pixels
+    
+    def set_app(self, app):
+        """Set Flask app instance"""
+        self.app = app
         
     def set_broadcast_functions(self, broadcast_parking_update, broadcast_detection):
         """Set broadcast functions for real-time updates"""
@@ -73,6 +78,13 @@ class VideoProcessor:
             self.current_thread.join(timeout=5)
         self.logger.info("Stopped live video processing")
     
+    def get_current_frame(self):
+        """Get the current processed frame for streaming"""
+        # Return the last processed frame
+        if hasattr(self, 'last_frame'):
+            return self.last_frame
+        return None
+
     def process_video_file(self, filepath):
         """Process uploaded video file"""
         if self.is_processing:
@@ -94,7 +106,17 @@ class VideoProcessor:
             self.logger.warning("Computer vision not available - using mock live feed")
             self._mock_live_feed()
             return
-            
+        
+        # CRITICAL: Push application context for database access
+        if self.app:
+            with self.app.app_context():
+                self._process_live_feed_with_context(camera_index)
+        else:
+            self.logger.error("No Flask app instance available")
+            self.is_processing = False
+    
+    def _process_live_feed_with_context(self, camera_index):
+        """Process live feed within Flask app context"""
         cap = cv2.VideoCapture(camera_index)
         if not cap.isOpened():
             self.logger.error(f"Cannot open camera {camera_index}")
@@ -110,6 +132,9 @@ class VideoProcessor:
                 if not ret:
                     self.logger.warning("Failed to read frame from camera")
                     break
+                
+                # Store last frame for potential streaming
+                self.last_frame = frame.copy()
                 
                 # Process every 5th frame to reduce computational load
                 if frame_count % 5 == 0:
@@ -131,7 +156,17 @@ class VideoProcessor:
             self.logger.warning("Computer vision not available - using mock video processing")
             self._mock_video_processing(filepath)
             return
-            
+        
+        # CRITICAL: Push application context for database access
+        if self.app:
+            with self.app.app_context():
+                self._process_video_file_with_context(filepath)
+        else:
+            self.logger.error("No Flask app instance available")
+            self.is_processing = False
+    
+    def _process_video_file_with_context(self, filepath):
+        """Process video file within Flask app context"""
         cap = cv2.VideoCapture(filepath)
         if not cap.isOpened():
             self.logger.error(f"Cannot open video file: {filepath}")
@@ -199,7 +234,7 @@ class VideoProcessor:
             self._track_vehicles(vehicles, frame)
             
             # Log detection
-            with db.session.begin():
+            try:
                 detection = DetectionLog(
                     detection_type='detection',
                     vehicle_count=len(vehicles),
@@ -207,6 +242,9 @@ class VideoProcessor:
                 )
                 db.session.add(detection)
                 db.session.commit()
+            except Exception as e:
+                self.logger.error(f"Error logging detection: {e}")
+                db.session.rollback()
             
             # Broadcast real-time update
             if self.broadcast_detection:
@@ -222,37 +260,36 @@ class VideoProcessor:
     def _update_parking_spaces(self, vehicles, frame):
         """Update parking space occupancy based on detected vehicles"""
         try:
-            with db.session.begin():
-                parking_spaces = ParkingSpace.query.all()
+            parking_spaces = ParkingSpace.query.all()
+            
+            for space in parking_spaces:
+                was_occupied = space.is_occupied
+                is_occupied = False
                 
-                for space in parking_spaces:
-                    was_occupied = space.is_occupied
-                    is_occupied = False
+                # Check if any vehicle overlaps with this parking space
+                for vehicle in vehicles:
+                    x1, y1, x2, y2 = vehicle['bbox']
                     
-                    # Check if any vehicle overlaps with this parking space
-                    for vehicle in vehicles:
-                        x1, y1, x2, y2 = vehicle['bbox']
-                        
-                        # Check for overlap with parking space
-                        if self._rectangles_overlap(
-                            (x1, y1, x2, y2),
-                            (space.x1, space.y1, space.x2, space.y2)
-                        ):
-                            is_occupied = True
-                            break
-                    
-                    space.is_occupied = is_occupied
-                    
-                    # If occupancy changed, broadcast update
-                    if was_occupied != is_occupied and self.broadcast_parking_update:
-                        self.broadcast_parking_update({
-                            'space_id': space.id,
-                            'space_name': space.name,
-                            'is_occupied': is_occupied,
-                            'timestamp': datetime.utcnow().isoformat()
-                        })
+                    # Check for overlap with parking space
+                    if self._rectangles_overlap(
+                        (x1, y1, x2, y2),
+                        (space.x1, space.y1, space.x2, space.y2)
+                    ):
+                        is_occupied = True
+                        break
                 
-                db.session.commit()
+                space.is_occupied = is_occupied
+                
+                # If occupancy changed, broadcast update
+                if was_occupied != is_occupied and self.broadcast_parking_update:
+                    self.broadcast_parking_update({
+                        'space_id': space.id,
+                        'space_name': space.name,
+                        'is_occupied': is_occupied,
+                        'timestamp': datetime.utcnow().isoformat()
+                    })
+            
+            db.session.commit()
                 
         except Exception as e:
             self.logger.error(f"Error updating parking spaces: {e}")
@@ -326,7 +363,7 @@ class VideoProcessor:
                 self.parking_manager.handle_vehicle_detection(license_plate)
                 
                 # Log detection
-                with db.session.begin():
+                try:
                     detection = DetectionLog(
                         detection_type='license_plate',
                         license_plate=license_plate,
@@ -335,6 +372,9 @@ class VideoProcessor:
                     )
                     db.session.add(detection)
                     db.session.commit()
+                except Exception as e:
+                    self.logger.error(f"Error logging license plate detection: {e}")
+                    db.session.rollback()
                 
                 # Broadcast detection
                 if self.broadcast_detection:
@@ -350,6 +390,16 @@ class VideoProcessor:
     
     def _mock_live_feed(self):
         """Mock live feed for demonstration when CV libraries are not available"""
+        # CRITICAL: Push application context for database access
+        if self.app:
+            with self.app.app_context():
+                self._mock_live_feed_with_context()
+        else:
+            self.logger.error("No Flask app instance available")
+            self.is_processing = False
+    
+    def _mock_live_feed_with_context(self):
+        """Mock live feed within Flask app context"""
         self.logger.info("Starting mock live feed")
         frame_count = 0
         
@@ -366,6 +416,16 @@ class VideoProcessor:
     
     def _mock_video_processing(self, filepath):
         """Mock video processing for demonstration"""
+        # CRITICAL: Push application context for database access
+        if self.app:
+            with self.app.app_context():
+                self._mock_video_processing_with_context(filepath)
+        else:
+            self.logger.error("No Flask app instance available")
+            self.is_processing = False
+    
+    def _mock_video_processing_with_context(self, filepath):
+        """Mock video processing within Flask app context"""
         import os
         self.logger.info(f"Starting mock processing of {os.path.basename(filepath)}")
         
@@ -404,17 +464,17 @@ class VideoProcessor:
             
             # Log detection
             try:
-                with db.session.begin():
-                    detection = DetectionLog(
-                        detection_type='license_plate',
-                        license_plate=license_plate,
-                        confidence=0.8,
-                        timestamp=datetime.utcnow()
-                    )
-                    db.session.add(detection)
-                    db.session.commit()
+                detection = DetectionLog(
+                    detection_type='license_plate',
+                    license_plate=license_plate,
+                    confidence=0.8,
+                    timestamp=datetime.utcnow()
+                )
+                db.session.add(detection)
+                db.session.commit()
             except Exception as e:
                 self.logger.error(f"Error logging mock detection: {e}")
+                db.session.rollback()
             
             # Broadcast detection
             if self.broadcast_detection:
@@ -426,16 +486,16 @@ class VideoProcessor:
         
         # Log general detection
         try:
-            with db.session.begin():
-                detection = DetectionLog(
-                    detection_type='detection',
-                    vehicle_count=vehicle_count,
-                    timestamp=datetime.utcnow()
-                )
-                db.session.add(detection)
-                db.session.commit()
+            detection = DetectionLog(
+                detection_type='detection',
+                vehicle_count=vehicle_count,
+                timestamp=datetime.utcnow()
+            )
+            db.session.add(detection)
+            db.session.commit()
         except Exception as e:
             self.logger.error(f"Error logging mock detection: {e}")
+            db.session.rollback()
         
         # Broadcast real-time update
         if self.broadcast_detection:

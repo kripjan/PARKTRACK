@@ -24,6 +24,9 @@ document.addEventListener('DOMContentLoaded', function() {
     updateDurationCounters();
     setInterval(updateDurationCounters, 1000); // Update every second
     
+    // Video feed controls
+    setupVideoFeedControls();
+    
     // Socket event handlers
     socket.on('connect', function() {
         console.log('Connected to server');
@@ -43,9 +46,71 @@ document.addEventListener('DOMContentLoaded', function() {
         handleNewDetection(data);
     });
     
+    function setupVideoFeedControls() {
+        // Handle start live feed button
+        const startFeedForm = document.getElementById('start-feed-form');
+        if (startFeedForm) {
+            startFeedForm.addEventListener('submit', function(e) {
+                // Don't prevent default - let form submit
+                // But show video container after a delay
+                setTimeout(function() {
+                    showVideoFeed();
+                }, 1000);
+            });
+        }
+        
+        // Handle stop live feed button
+        const stopFeedForm = document.querySelector('form[action*="stop_live_feed"]');
+        if (stopFeedForm) {
+            stopFeedForm.addEventListener('submit', function(e) {
+                // Don't prevent default - let form submit
+                // But hide video container immediately
+                hideVideoFeed();
+            });
+        }
+    }
+    
+    function showVideoFeed() {
+        const noVideo = document.getElementById('no-video');
+        const videoContainer = document.getElementById('video-container');
+        const videoFeed = document.getElementById('video-feed');
+        
+        if (noVideo && videoContainer && videoFeed) {
+            noVideo.style.display = 'none';
+            videoContainer.style.display = 'block';
+            
+            // Set video feed source - add timestamp to prevent caching
+            const videoUrl = window.location.origin + '/video_feed?' + new Date().getTime();
+            videoFeed.src = videoUrl;
+            
+            // Show success message
+            updateFeedStatus('Live video feed started', 'success');
+        }
+    }
+    
+    function hideVideoFeed() {
+        const noVideo = document.getElementById('no-video');
+        const videoContainer = document.getElementById('video-container');
+        const videoFeed = document.getElementById('video-feed');
+        
+        if (noVideo && videoContainer && videoFeed) {
+            // Stop video feed
+            videoFeed.src = '';
+            
+            // Hide video container
+            videoContainer.style.display = 'none';
+            noVideo.style.display = 'block';
+            
+            // Show info message
+            updateFeedStatus('Live video feed stopped', 'info');
+        }
+    }
+    
     function initializeChart() {
-        const ctx = document.getElementById('detectionChart').getContext('2d');
-        detectionChart = new Chart(ctx, {
+        const ctx = document.getElementById('detectionChart');
+        if (!ctx) return;
+        
+        detectionChart = new Chart(ctx.getContext('2d'), {
             type: 'line',
             data: chartData,
             options: {
@@ -135,7 +200,9 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         
         // Update chart
-        detectionChart.update('none');
+        if (detectionChart) {
+            detectionChart.update('none');
+        }
     }
     
     function updateStatistics() {
@@ -146,6 +213,8 @@ document.addEventListener('DOMContentLoaded', function() {
     
     function addRecentActivity(data) {
         const activityContainer = document.getElementById('recent-activity');
+        if (!activityContainer) return;
+        
         const activityItem = createActivityItem(data);
         
         // Add to top of activity list
@@ -160,7 +229,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     function createActivityItem(data) {
         const item = document.createElement('div');
-        item.className = 'd-flex align-items-center mb-3';
+        item.className = 'd-flex align-items-center mb-3 activity-item new-item';
         
         let icon = 'bi-eye';
         let iconClass = 'text-info';
@@ -173,7 +242,7 @@ document.addEventListener('DOMContentLoaded', function() {
         } else if (data.type === 'exit') {
             icon = 'bi-arrow-left-circle';
             iconClass = 'text-danger';
-            description = `${data.license_plate} exited (${data.duration_minutes}min, $${data.toll_amount})`;
+            description = `${data.license_plate} exited (${data.duration_minutes}min, Rs. ${data.toll_amount})`;
         } else if (data.type === 'license_plate') {
             icon = 'bi-credit-card';
             iconClass = 'text-warning';
@@ -249,6 +318,11 @@ document.addEventListener('DOMContentLoaded', function() {
         if (statusDiv && statusText) {
             statusDiv.className = `alert alert-${type} d-block`;
             statusText.textContent = message;
+            
+            // Auto-hide after 5 seconds
+            setTimeout(() => {
+                statusDiv.classList.add('d-none');
+            }, 5000);
         }
     }
     
@@ -273,16 +347,16 @@ document.addEventListener('DOMContentLoaded', function() {
             const diffMs = now - entryTime;
             const diffMins = Math.floor(diffMs / (1000 * 60));
             
-            // Calculate estimated cost based on duration
+            // Calculate estimated cost based on duration (NPR)
             let cost = 0;
             if (diffMins <= 60) {
-                cost = 2.0;
+                cost = 50.0;  // Rs. 50 for first hour
             } else {
                 const additionalHours = Math.ceil((diffMins - 60) / 60);
-                cost = 2.0 + (additionalHours * 1.0);
+                cost = 50.0 + (additionalHours * 30.0);  // Rs. 30 per additional hour
             }
             
-            counter.textContent = `$${cost.toFixed(2)}`;
+            counter.textContent = `Rs. ${cost.toFixed(2)}`;
         });
     }
 });
