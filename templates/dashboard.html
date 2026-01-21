@@ -13,18 +13,6 @@
     </div>
 </div>
 
-<!-- Configuration Status Alert -->
-<div class="row mb-4" id="config-status-alert" style="display: none;">
-    <div class="col-12">
-        <div class="alert alert-warning alert-dismissible fade show" role="alert">
-            <i class="bi bi-exclamation-triangle me-2"></i>
-            <strong>Parking Detection Not Configured!</strong> 
-            Please run <code>setup_parking_config.py</code> or upload configuration files before processing videos.
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-        </div>
-    </div>
-</div>
-
 <!-- Video Upload Controls -->
 <div class="row mb-4">
     <div class="col-12">
@@ -42,7 +30,7 @@
                             <label for="video-file" class="form-label">Select Video File</label>
                             <input type="file" class="form-control" id="video-file" name="video" accept=".mp4,.avi,.mov,.mkv" required>
                             <div class="form-text">
-                                Upload video for parking space detection and tracking (MP4, AVI, MOV, MKV - Max 100MB)
+                                Upload video for vehicle detection and tracking (MP4, AVI, MOV, MKV - Max 100MB)
                             </div>
                         </div>
                         <div class="col-md-4 mb-3 d-flex align-items-end">
@@ -52,6 +40,10 @@
                             </button>
                         </div>
                     </div>
+                    <!-- Debug button -->
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('live-feed-section').style.display='block'">
+                        Show Live Feed (Debug)
+                    </button>
                 </form>
                 <div class="row">
                     <div class="col-12">
@@ -66,111 +58,97 @@
     </div>
 </div>
 
-<!-- Live Video Processing Viewer -->
-<div class="row mb-4" id="live-processing-container" style="display: none;">
+<!-- Live Video Feed Section -->
+<div class="row mb-4" id="live-feed-section">
     <div class="col-12">
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="card-title mb-0">
                     <i class="bi bi-broadcast me-2"></i>
-                    Live Processing View
+                    Live Camera Feed & Schematic View
                 </h5>
-                <div>
-                    <span class="badge bg-success me-2">
-                        <i class="bi bi-circle-fill" style="font-size: 0.5rem;"></i>
-                        LIVE
-                    </span>
-                    <button class="btn btn-sm btn-outline-primary" id="download-output-btn" style="display: none;">
-                        <i class="bi bi-download me-1"></i>
-                        Download Processed Video
-                    </button>
-                </div>
+                <span class="badge bg-success">
+                    <i class="bi bi-circle-fill me-1" style="font-size: 0.5rem;"></i>
+                    Live
+                </span>
             </div>
-            <div class="card-body">
-                <!-- Progress Bar -->
-                <div class="mb-3">
-                    <div class="d-flex justify-content-between mb-1">
-                        <small>Processing Progress</small>
-                        <small id="progress-text">0%</small>
-                    </div>
-                    <div class="progress">
-                        <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" 
-                             id="processing-progress" 
-                             role="progressbar" 
-                             style="width: 0%">
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Live Video Frames -->
-                <div class="row">
-                    <div class="col-lg-6 mb-3">
-                        <div class="card bg-dark">
-                            <div class="card-header">
-                                <h6 class="text-white mb-0">
-                                    <i class="bi bi-camera-video me-2"></i>
-                                    Camera View (Inference)
-                                </h6>
-                            </div>
-                            <div class="card-body p-0">
-                                <img id="camera-frame" 
-                                     class="img-fluid w-100" 
-                                     style="min-height: 300px; background: #000;"
-                                     alt="Camera view">
-                                <div id="camera-placeholder" class="text-center py-5 text-muted">
-                                    <i class="bi bi-camera-video" style="font-size: 3rem;"></i>
-                                    <p class="mt-2">Waiting for video frames...</p>
+            <div class="card-body p-0">
+                <div class="row g-0">
+                    <!-- Camera View -->
+                    <div class="col-lg-6 border-end">
+                        <div class="p-3">
+                            <h6 class="mb-3">
+                                <i class="bi bi-camera-video me-2"></i>
+                                Camera View
+                            </h6>
+                            <div class="position-relative bg-dark rounded" style="min-height: 400px;">
+                                <img id="camera-feed" 
+                                     class="img-fluid w-100 rounded" 
+                                     style="display: none;"
+                                     alt="Camera Feed">
+                                <div id="camera-placeholder" class="d-flex align-items-center justify-content-center" style="min-height: 400px;">
+                                    <div class="text-center text-muted">
+                                        <i class="bi bi-camera-video" style="font-size: 3rem;"></i>
+                                        <p class="mt-2">Waiting for video feed...</p>
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
-
-                    <div class="col-lg-6 mb-3">
-                        <div class="card bg-dark">
-                            <div class="card-header">
-                                <h6 class="text-white mb-0">
-                                    <i class="bi bi-diagram-3 me-2"></i>
-                                    Schematic View (Bird's-Eye)
-                                </h6>
-                            </div>
-                            <div class="card-body p-0">
-                                <img id="schematic-frame" 
-                                     class="img-fluid w-100" 
-                                     style="min-height: 300px; background: #fff;"
-                                     alt="Schematic view">
-                                <div id="schematic-placeholder" class="text-center py-5 text-muted">
-                                    <i class="bi bi-diagram-3" style="font-size: 3rem;"></i>
-                                    <p class="mt-2">Waiting for schematic...</p>
+                    
+                    <!-- Schematic View -->
+                    <div class="col-lg-6">
+                        <div class="p-3">
+                            <h6 class="mb-3">
+                                <i class="bi bi-diagram-3 me-2"></i>
+                                Bird's Eye View (Schematic)
+                            </h6>
+                            <div class="position-relative bg-light rounded" style="min-height: 400px;">
+                                <img id="schematic-feed" 
+                                     class="img-fluid w-100 rounded" 
+                                     style="display: none;"
+                                     alt="Schematic View">
+                                <div id="schematic-placeholder" class="d-flex align-items-center justify-content-center" style="min-height: 400px;">
+                                    <div class="text-center text-muted">
+                                        <i class="bi bi-diagram-3" style="font-size: 3rem;"></i>
+                                        <p class="mt-2">Waiting for schematic...</p>
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
-
-                <!-- Processing Stats -->
-                <div class="row text-center">
-                    <div class="col-md-4">
-                        <div class="card bg-light">
-                            <div class="card-body">
-                                <h4 class="text-primary mb-1" id="frames-processed-live">0</h4>
-                                <small class="text-muted">Frames Processed</small>
+                
+                <!-- Live Statistics Bar -->
+                <div class="border-top p-3 bg-light">
+                    <div class="row text-center">
+                        <div class="col-md-3">
+                            <div class="mb-2">
+                                <i class="bi bi-grid-3x3 text-primary" style="font-size: 1.5rem;"></i>
                             </div>
+                            <h5 class="mb-0 text-danger" id="live-total-spaces">0</h5>
+                            <small class="text-primary">Total Spaces</small>
                         </div>
-                    </div>
-                    <div class="col-md-4">
-                        <div class="card bg-light">
-                            <div class="card-body">
-                                <h4 class="text-danger mb-1" id="occupied-live">0</h4>
-                                <small class="text-muted">Occupied Spaces</small>
+                        <div class="col-md-3">
+                            <div class="mb-2">
+                                <i class="bi bi-car-front-fill text-danger" style="font-size: 1.5rem;"></i>
                             </div>
+                            <h5 class="mb-0 text-danger" id="live-occupied-spaces">0</h5>
+                            <small class="text-primary">Occupied</small>
                         </div>
-                    </div>
-                    <div class="col-md-4">
-                        <div class="card bg-light">
-                            <div class="card-body">
-                                <h4 class="text-success mb-1" id="available-live">0</h4>
-                                <small class="text-muted">Available Spaces</small>
+                        <div class="col-md-3">
+                            <div class="mb-2">
+                                <i class="bi bi-check-circle-fill text-success" style="font-size: 1.5rem;"></i>
                             </div>
+                            <h5 class="mb-0 text-danger" id="live-available-spaces">0</h5>
+                            <small class="text-primary">Available</small>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="mb-2">
+                                <i class="bi bi-percent text-warning" style="font-size: 1.5rem;"></i>
+                            </div>
+                            <h5 class="mb-0 text-danger" id="live-occupancy-rate">0%</h5>
+                            <small class="text-primary">Occupancy Rate</small>
                         </div>
                     </div>
                 </div>
@@ -365,6 +343,7 @@
     </div>
 </div>
 {% endblock %}
+
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
