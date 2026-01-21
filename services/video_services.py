@@ -5,6 +5,7 @@ import os
 import logging
 from werkzeug.utils import secure_filename
 from video_processor import VideoProcessor
+from parking_detector import ParkingDetector
 
 
 class VideoService:
@@ -15,6 +16,7 @@ class VideoService:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         self.video_processor = VideoProcessor()
+        self.parking_detector = self.video_processor.parking_detector  # Add reference to parking detector
         self.detected_plates = []
     
     def set_broadcast_functions(self, broadcast_parking_update, broadcast_detection, broadcast_plate_detection):

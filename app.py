@@ -46,15 +46,10 @@ socketio.init_app(app, cors_allowed_origins="*", async_mode='threading')
 import routes
 
 def initialize_parking_spaces():
-    """Initialize parking spaces from configuration file"""
+    """Sync parking spaces in DB with ROI configuration"""
     from models import ParkingSpace
-    
+
     try:
-        # Check if parking spaces already exist
-        if ParkingSpace.query.count() > 0:
-            logger.info(f"Parking spaces already initialized ({ParkingSpace.query.count()} spaces)")
-            return True
-        
         # Path to parking configuration
         slots_path = os.path.join(app.config['UPLOAD_FOLDER'], 'parking_config', 'slots_points.json')
         
@@ -67,38 +62,47 @@ def initialize_parking_spaces():
         with open(slots_path, 'r') as f:
             slots_data = json.load(f)
         
-        logger.info(f"Found {len(slots_data)} parking slots in configuration")
+        db_count = ParkingSpace.query.count()
+        roi_count = len(slots_data)
         
-        # Create parking space records
-        for i, slot in enumerate(slots_data):
-            points = slot['points']
-            
-            # Calculate bounding box from polygon points
-            xs = [p[0] for p in points]
-            ys = [p[1] for p in points]
-            
-            # Get slot name from config or generate default
-            slot_name = slot.get('name', f'Slot-{i+1}')
-            
-            space = ParkingSpace(
-                name=slot_name,
-                x1=int(min(xs)),
-                y1=int(min(ys)),
-                x2=int(max(xs)),
-                y2=int(max(ys)),
-                is_occupied=False
-            )
-            db.session.add(space)
-            logger.info(f"Created parking space: {slot_name}")
+        if db_count != roi_count:
+            logger.info(f"Syncing DB parking spaces: {db_count} → {roi_count}")
+
+            # Delete all old spaces
+            ParkingSpace.query.delete()
+            db.session.commit()
+
+            # Create parking space records from JSON
+            for i, slot in enumerate(slots_data):
+                points = slot['points']
+                xs = [p[0] for p in points]
+                ys = [p[1] for p in points]
+                
+                slot_name = slot.get('name', f'Slot-{i+1}')
+                
+                space = ParkingSpace(
+                    name=slot_name,
+                    x1=int(min(xs)),
+                    y1=int(min(ys)),
+                    x2=int(max(xs)),
+                    y2=int(max(ys)),
+                    is_occupied=False
+                )
+                db.session.add(space)
+                logger.info(f"Created parking space: {slot_name}")
+
+            db.session.commit()
+            logger.info(f"✓ DB parking spaces synced with {roi_count} slots from configuration")
+        else:
+            logger.info("Parking spaces already synced with ROI configuration")
         
-        db.session.commit()
-        logger.info(f"✓ Successfully initialized {len(slots_data)} parking spaces")
         return True
-        
+
     except Exception as e:
-        logger.error(f"Error initializing parking spaces: {e}")
+        logger.error(f"Error initializing/syncing parking spaces: {e}")
         db.session.rollback()
         return False
+
 
 with app.app_context():
     # Import models to ensure tables are created

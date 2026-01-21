@@ -4,10 +4,12 @@ Routes module - Dashboard with video upload, separate Parking Spaces page, Video
 import os
 import json
 import glob
+from datetime import datetime
 from flask import render_template, request, redirect, url_for, flash, jsonify, send_from_directory
 from flask_socketio import emit
 from werkzeug.utils import secure_filename
 from app import app, socketio
+from models import ParkingSpace
 from services import DashboardService, VideoService, ReportService, ParkingSpaceService
 from parking_manager import ParkingManager
 
@@ -66,9 +68,6 @@ def api_parking_statistics():
 @app.route('/download_processed_video/<filename>')
 def download_processed_video(filename):
     """Download processed parking video"""
-    from werkzeug.utils import secure_filename
-    from flask import send_from_directory
-    
     safe_filename = secure_filename(filename)
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], safe_filename)
     

@@ -4,6 +4,8 @@ import logging
 import os
 import base64
 from datetime import datetime
+from flask import current_app
+from app import app, db
 try:
     import cv2
     import numpy as np
@@ -12,7 +14,6 @@ try:
 except ImportError:
     CV_AVAILABLE = False
     
-from models import db
 from models import DetectionLog, ParkingSpace, Vehicle, ParkingSession
 from license_plate_detector import LicensePlateDetector
 from parking_manager import ParkingManager
@@ -102,17 +103,19 @@ class VideoProcessor:
         self.logger.info(f"Started processing video file: {filepath} in {mode} mode")
     
     def _process_video_file(self, filepath):
-        """Internal method to process video file"""
-        if not CV_AVAILABLE:
-            self.logger.warning("Computer vision not available - using mock video processing")
-            self._mock_video_processing(filepath)
-            return
-        
-        # Choose processing method based on mode
-        if self.processing_mode == 'parking':
-            self._process_video_parking(filepath)
-        else:
-            self._process_video_plates(filepath)
+        """Internal method to process video file - WRAPPED IN APP CONTEXT"""
+        # CRITICAL: Wrap entire processing in app context
+        with app.app_context():
+            if not CV_AVAILABLE:
+                self.logger.warning("Computer vision not available - using mock video processing")
+                self._mock_video_processing(filepath)
+                return
+            
+            # Choose processing method based on mode
+            if self.processing_mode == 'parking':
+                self._process_video_parking(filepath)
+            else:
+                self._process_video_plates(filepath)
     
     def _process_video_parking(self, filepath):
         """Process video for parking space occupancy detection with live streaming"""
@@ -384,8 +387,8 @@ class VideoProcessor:
                 
                 self.detected_plates.append(plate_data)
                 
-                # Log to database
-                with db.session.begin():
+                # Log to database (already in app context)
+                try:
                     detection = DetectionLog(
                         detection_type='license_plate',
                         license_plate=license_plate_text,
@@ -394,6 +397,9 @@ class VideoProcessor:
                     )
                     db.session.add(detection)
                     db.session.commit()
+                except Exception as db_error:
+                    self.logger.error(f"Database error: {db_error}")
+                    db.session.rollback()
                 
                 # Broadcast
                 if self.broadcast_plate_detection:
@@ -409,27 +415,27 @@ class VideoProcessor:
     def _update_parking_spaces_from_slots(self, slot_status):
         """Update parking space occupancy in database from slot status"""
         try:
-            with db.session.begin():
-                # Get all parking spaces (assuming they match slot indices)
-                spaces = ParkingSpace.query.order_by(ParkingSpace.id).all()
-                
-                for i, is_occupied in enumerate(slot_status):
-                    if i < len(spaces):
-                        space = spaces[i]
-                        was_occupied = space.is_occupied
-                        space.is_occupied = is_occupied
-                        
-                        # Broadcast if changed
-                        if was_occupied != is_occupied and self.broadcast_parking_update:
-                            self.broadcast_parking_update({
-                                'space_id': space.id,
-                                'space_name': space.name,
-                                'is_occupied': is_occupied,
-                                'timestamp': datetime.utcnow().isoformat()
-                            })
-                
-                db.session.commit()
-                
+            # Already in app context from parent function
+            # Get all parking spaces (assuming they match slot indices)
+            spaces = ParkingSpace.query.order_by(ParkingSpace.id).all()
+            
+            for i, is_occupied in enumerate(slot_status):
+                if i < len(spaces):
+                    space = spaces[i]
+                    was_occupied = space.is_occupied
+                    space.is_occupied = is_occupied
+                    
+                    # Broadcast if changed
+                    if was_occupied != is_occupied and self.broadcast_parking_update:
+                        self.broadcast_parking_update({
+                            'space_id': space.id,
+                            'space_name': space.name,
+                            'is_occupied': is_occupied,
+                            'timestamp': datetime.utcnow().isoformat()
+                        })
+            
+            db.session.commit()
+            
         except Exception as e:
             self.logger.error(f"Error updating parking spaces: {e}")
             db.session.rollback()
@@ -459,6 +465,11 @@ class VideoProcessor:
                 completion_data['output_video'] = os.path.basename(output_path)
             
             self.broadcast_detection(completion_data)
+    
+    def _mock_video_processing(self, filepath):
+        """Mock video processing when CV is not available"""
+        self.logger.info("Running mock video processing")
+        self.is_processing = False
     
     def get_detected_plates(self):
         """Get list of detected plates"""

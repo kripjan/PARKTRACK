@@ -11,7 +11,6 @@ from shapely.geometry import Point, Polygon
 
 try:
     from ultralytics import YOLO
-    from deep_sort_realtime.deepsort_tracker import DeepSort
     CV_AVAILABLE = True
 except ImportError:
     CV_AVAILABLE = False
@@ -34,7 +33,6 @@ class ParkingDetector:
         self.schematic_size = None
         
         self.model = None
-        self.tracker = None
         
         # Load configuration
         self.load_configuration()
@@ -97,7 +95,7 @@ class ParkingDetector:
             return False
     
     def initialize_models(self, model_path='model/yolov8s.pt', device='cuda'):
-        """Initialize YOLO and DeepSORT models"""
+        """Initialize YOLO model"""
         if not CV_AVAILABLE:
             self.logger.warning("CV libraries not available")
             return False
@@ -110,10 +108,6 @@ class ParkingDetector:
             else:
                 self.logger.warning(f"Model not found: {model_path}")
                 return False
-            
-            # Initialize DeepSORT tracker
-            self.tracker = DeepSort(max_age=30, embedder="osnet_x0_25", embedder_device=device)
-            self.logger.info("DeepSORT tracker initialized")
             
             return True
             
@@ -132,31 +126,30 @@ class ParkingDetector:
         Returns:
             tuple: (processed_frame, schematic_view, slot_status)
         """
-        if self.model is None or self.tracker is None:
-            self.logger.warning("Models not initialized")
+        if self.model is None:
+            self.logger.warning("Model not initialized")
             return frame, None, []
         
         try:
-            # Object detection with YOLO
-            results = self.model.track(frame, persist=True, classes=[2, 3, 5, 7], imgsz=416)
-            detections = results[0].boxes.xyxy.cpu().numpy() if results[0].boxes else []
+            # Object detection with YOLO (classes: car=2, motorcycle=3, bus=5, truck=7)
+            results = self.model(frame, classes=[2, 3, 5, 7], imgsz=416, verbose=False)
             
-            # Prepare DeepSORT inputs
-            track_inputs = []
-            for box in detections:
-                x1, y1, x2, y2 = map(int, box[:4])
+            # Get detections
+            detections = []
+            if results and len(results) > 0 and results[0].boxes is not None:
+                boxes = results[0].boxes.xyxy.cpu().numpy()
                 
-                # Draw bounding box
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
-                
-                # Draw center point
-                cx, cy = int((x1 + x2) / 2), int((y1 + y2) / 2)
-                cv2.circle(frame, (cx, cy), 4, (0, 0, 255), -1)
-                
-                track_inputs.append(([x1, y1, x2 - x1, y2 - y1], 0.9, 'vehicle'))
-            
-            # Update tracker
-            tracks = self.tracker.update_tracks(track_inputs, frame=frame)
+                for box in boxes:
+                    x1, y1, x2, y2 = map(int, box[:4])
+                    
+                    # Draw bounding box on frame
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
+                    
+                    # Calculate center point
+                    cx, cy = int((x1 + x2) / 2), int((y1 + y2) / 2)
+                    cv2.circle(frame, (cx, cy), 4, (0, 0, 255), -1)
+                    
+                    detections.append((cx, cy))
             
             # Create schematic canvas
             schematic = np.ones((self.schematic_size[1], self.schematic_size[0], 3), dtype=np.uint8) * 255
@@ -166,14 +159,8 @@ class ParkingDetector:
             if self.src_pts is not None:
                 cv2.polylines(frame, [self.src_pts.astype(int)], isClosed=True, color=(255, 0, 0), thickness=2)
             
-            # Map tracked vehicles to bird's-eye view
-            for track in tracks:
-                if not track.is_confirmed():
-                    continue
-                
-                x, y, w, h = track.to_ltwh()
-                cx, cy = int(x + w / 2), int(y + h / 2)
-                
+            # Map detected vehicle centers to bird's-eye view
+            for (cx, cy) in detections:
                 # Transform to bird's-eye view
                 pt = np.array([[[cx, cy]]], dtype=np.float32)
                 mapped_pt = cv2.perspectiveTransform(pt, self.H)[0][0]
