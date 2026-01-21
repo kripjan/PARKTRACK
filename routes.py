@@ -12,6 +12,9 @@ from app import app, socketio
 from models import ParkingSpace
 from services import DashboardService, VideoService, ReportService, ParkingSpaceService
 from parking_manager import ParkingManager
+from image_plate_detector import ImagePlateDetector
+
+image_plate_detector = ImagePlateDetector(app.config['UPLOAD_FOLDER'])
 
 # Initialize services
 dashboard_service = DashboardService()
@@ -336,6 +339,113 @@ def broadcast_plate_detection(plate_data):
     socketio.emit('plate_detected', plate_data)
 
 
+
+@app.route('/plate_corrector')
+def plate_corrector():
+    """Plate Corrector page - image-based detection with manual correction"""
+    return render_template('plate_corrector.html')
+
+
+@app.route('/upload_plate_image', methods=['POST'])
+def upload_plate_image():
+    """Handle image upload for plate detection"""
+    try:
+        if 'image' not in request.files:
+            return jsonify({'success': False, 'message': 'No image file uploaded'}), 400
+        
+        file = request.files['image']
+        
+        if file.filename == '':
+            return jsonify({'success': False, 'message': 'No file selected'}), 400
+        
+        # Validate file type
+        allowed_extensions = {'jpg', 'jpeg', 'png', 'bmp'}
+        if not ('.' in file.filename and 
+                file.filename.rsplit('.', 1)[1].lower() in allowed_extensions):
+            return jsonify({'success': False, 'message': 'Invalid file type. Use JPG, PNG, or BMP'}), 400
+        
+        # Save uploaded image
+        filename = secure_filename(file.filename)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f'upload_{timestamp}_{filename}'
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
+        
+        # Process image
+        result = image_plate_detector.process_image(filepath)
+        
+        if not result['success']:
+            return jsonify({
+                'success': False,
+                'message': result['message']
+            }), 400
+        
+        # Prepare response
+        response_data = {
+            'success': True,
+            'message': result['message'],
+            'original_image': url_for('serve_upload', filename=os.path.basename(filepath)),
+            'plate_text': result['plate_text'],
+            'timestamp': result['timestamp']
+        }
+        
+        # Add cropped plate URL if available
+        if result['cropped_plate']:
+            response_data['cropped_plate'] = url_for('serve_upload', 
+                filename=f"detected_plates/{os.path.basename(result['cropped_plate'])}")
+        
+        return jsonify(response_data)
+        
+    except Exception as e:
+        logger.error(f"Error processing plate image: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/save_corrected_plate', methods=['POST'])
+def save_corrected_plate():
+    """Save manually corrected plate to database"""
+    try:
+        data = request.get_json()
+        
+        detected_text = data.get('detected_text', '')
+        corrected_text = data.get('corrected_text', '')
+        cropped_plate_path = data.get('cropped_plate_path', '')
+        
+        if not corrected_text:
+            return jsonify({'success': False, 'message': 'No plate text provided'}), 400
+        
+        # Convert URL path back to file path
+        if cropped_plate_path.startswith('/uploads/'):
+            cropped_plate_path = os.path.join(
+                app.config['UPLOAD_FOLDER'], 
+                cropped_plate_path.replace('/uploads/', '')
+            )
+        
+        # Save to database
+        success, message = image_plate_detector.save_to_database(
+            detected_text, 
+            cropped_plate_path, 
+            corrected_text
+        )
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': message,
+                'plate_number': corrected_text
+            })
+        else:
+            return jsonify({'success': False, 'message': message}), 500
+            
+    except Exception as e:
+        logger.error(f"Error saving corrected plate: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/uploads/<path:filename>')
+def serve_upload(filename):
+    """Serve uploaded files"""
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 # ============================================================================
 # INITIALIZATION
 # ============================================================================

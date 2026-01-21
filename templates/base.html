@@ -43,8 +43,13 @@
                         </a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link {{ 'active' if request.endpoint == 'plate_corrector' }}" href="{{ url_for('plate_corrector') }}">
+                            <i class="bi bi-card-text me-1"></i>Plate Corrector
+                        </a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link {{ 'active' if request.endpoint == 'video_upload' }}" href="{{ url_for('video_upload') }}">
-                            <i class="bi bi-camera-video me-1"></i>Plate Detection
+                            <i class="bi bi-camera-video me-1"></i>Video Detection
                         </a>
                     </li>
                     <li class="nav-item">

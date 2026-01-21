@@ -1,0 +1,381 @@
+{% extends "base.html" %}
+
+{% block title %}Plate Corrector - Smart Parking System{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h1 class="h2 mb-0">
+            <i class="bi bi-card-text me-2"></i>
+            Plate Corrector
+        </h1>
+        <p class="text-muted">Upload image for license plate detection and manual correction</p>
+    </div>
+</div>
+
+<!-- Upload Section -->
+<div class="row mb-4">
+    <div class="col-lg-6 mb-3">
+        <div class="card h-100">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-cloud-upload me-2"></i>
+                    Upload Image
+                </h5>
+            </div>
+            <div class="card-body">
+                <form id="upload-form">
+                    <div class="mb-3">
+                        <label for="image-input" class="form-label">Select Image</label>
+                        <input type="file" class="form-control" id="image-input" accept="image/*" required>
+                        <div class="form-text">
+                            Supported formats: JPG, PNG, BMP
+                        </div>
+                    </div>
+                    
+                    <!-- Image Preview -->
+                    <div id="preview-container" class="mb-3" style="display: none;">
+                        <label class="form-label">Preview:</label>
+                        <img id="image-preview" class="img-fluid rounded border" style="max-height: 300px;" alt="Image preview">
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary w-100" id="upload-btn">
+                        <i class="bi bi-upload me-2"></i>
+                        Upload & Detect Plate
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Instructions -->
+    <div class="col-lg-6 mb-3">
+        <div class="card h-100 bg-dark">
+            <div class="card-header">
+                <h5 class="card-title mb-0 text-white">
+                    <i class="bi bi-info-circle me-2"></i>
+                    How It Works
+                </h5>
+            </div>
+            <div class="card-body">
+                <ol class="text-white-50 mb-0">
+                    <li class="mb-2">Upload an image containing a license plate</li>
+                    <li class="mb-2">System automatically detects and crops the plate</li>
+                    <li class="mb-2">OCR recognizes characters in the plate</li>
+                    <li class="mb-2">Review the detected text below the cropped image</li>
+                    <li class="mb-2">Edit manually if needed in the correction box</li>
+                    <li class="mb-2">Click "Save to Database" to store the plate</li>
+                </ol>
+                
+                <div class="alert alert-info mt-3 mb-0">
+                    <i class="bi bi-lightbulb me-2"></i>
+                    <small>
+                        <strong>Tip:</strong> For best results, ensure the license plate is clearly visible and well-lit in the image.
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Results Section -->
+<div id="results-section" class="row" style="display: none;">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-check-circle me-2"></i>
+                    Detection Results
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <!-- Cropped Plate -->
+                    <div class="col-lg-6 mb-3">
+                        <div class="card bg-dark h-100">
+                            <div class="card-body text-center">
+                                <h6 class="text-white mb-3">Cropped License Plate</h6>
+                                <img id="cropped-plate-image" class="img-fluid rounded border" alt="Cropped plate">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Detection Details & Correction -->
+                    <div class="col-lg-6 mb-3">
+                        <div class="card bg-light h-100">
+                            <div class="card-body">
+                                <h6 class="mb-3">Detected License Plate Number:</h6>
+                                <div class="alert alert-success mb-3">
+                                    <h4 class="mb-0 font-monospace" id="detected-plate-text">-</h4>
+                                </div>
+                                
+                                <h6 class="mb-2">Actual Plate no.</h6>
+                                <div class="input-group mb-3">
+                                    <span class="input-group-text">
+                                        <i class="bi bi-pencil"></i>
+                                    </span>
+                                    <input type="text" class="form-control form-control-lg font-monospace" 
+                                           id="corrected-plate-input" 
+                                           placeholder="Enter correct plate number">
+                                </div>
+                                
+                                <div class="d-grid gap-2">
+                                    <button class="btn btn-success btn-lg" id="save-plate-btn">
+                                        <i class="bi bi-save me-2"></i>
+                                        Save to Database
+                                    </button>
+                                    <button class="btn btn-outline-secondary" id="reset-btn">
+                                        <i class="bi bi-arrow-clockwise me-2"></i>
+                                        Upload Another Image
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Processing Modal -->
+<div class="modal fade" id="processing-modal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-body text-center py-4">
+                <div class="spinner-border text-primary mb-3" role="status" style="width: 3rem; height: 3rem;">
+                    <span class="visually-hidden">Processing...</span>
+                </div>
+                <h5>Processing Image...</h5>
+                <p class="text-muted mb-0">Detecting and recognizing license plate</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Success Modal -->
+<div class="modal fade" id="success-modal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title">
+                    <i class="bi bi-check-circle me-2"></i>
+                    Success
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-center py-4">
+                <i class="bi bi-check-circle text-success" style="font-size: 4rem;"></i>
+                <h4 class="mt-3" id="success-message">Plate saved successfully!</h4>
+                <p class="text-muted mb-0">License Plate: <strong class="font-monospace" id="saved-plate-number"></strong></p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">OK</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const uploadForm = document.getElementById('upload-form');
+    const imageInput = document.getElementById('image-input');
+    const uploadBtn = document.getElementById('upload-btn');
+    const imagePreview = document.getElementById('image-preview');
+    const previewContainer = document.getElementById('preview-container');
+    const resultsSection = document.getElementById('results-section');
+    const croppedPlateImage = document.getElementById('cropped-plate-image');
+    const detectedPlateText = document.getElementById('detected-plate-text');
+    const correctedPlateInput = document.getElementById('corrected-plate-input');
+    const savePlateBtn = document.getElementById('save-plate-btn');
+    const resetBtn = document.getElementById('reset-btn');
+    
+    const processingModal = new bootstrap.Modal(document.getElementById('processing-modal'));
+    const successModal = new bootstrap.Modal(document.getElementById('success-modal'));
+    
+    let currentCroppedPlatePath = '';
+    let currentDetectedText = '';
+    
+    // Image preview
+    imageInput.addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                imagePreview.src = e.target.result;
+                previewContainer.style.display = 'block';
+            };
+            reader.readAsDataURL(file);
+        }
+    });
+    
+    // Form submission
+    uploadForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        const file = imageInput.files[0];
+        if (!file) {
+            showAlert('Please select an image', 'warning');
+            return;
+        }
+        
+        const formData = new FormData();
+        formData.append('image', file);
+        
+        uploadBtn.disabled = true;
+        processingModal.show();
+        
+        fetch('/upload_plate_image', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            processingModal.hide();
+            uploadBtn.disabled = false;
+            
+            if (data.success) {
+                displayResults(data);
+                showAlert(data.message, 'success');
+            } else {
+                showAlert(data.message, 'danger');
+            }
+        })
+        .catch(error => {
+            processingModal.hide();
+            uploadBtn.disabled = false;
+            console.error('Error:', error);
+            showAlert('Error processing image', 'danger');
+        });
+    });
+    
+    // Display results
+    function displayResults(data) {
+        // Show results section
+        resultsSection.style.display = 'block';
+        resultsSection.scrollIntoView({ behavior: 'smooth' });
+        
+        // Display cropped plate
+        if (data.cropped_plate) {
+            croppedPlateImage.src = data.cropped_plate;
+            currentCroppedPlatePath = data.cropped_plate;
+        }
+        
+        // Display detected text
+        currentDetectedText = data.plate_text || '';
+        detectedPlateText.textContent = currentDetectedText || 'No text detected';
+        
+        // Pre-fill correction input with detected text
+        correctedPlateInput.value = currentDetectedText;
+        
+        // Focus on input for easy editing
+        setTimeout(() => correctedPlateInput.focus(), 300);
+    }
+    
+    // Save plate to database
+    savePlateBtn.addEventListener('click', function() {
+        const correctedText = correctedPlateInput.value.trim();
+        
+        if (!correctedText) {
+            showAlert('Please enter the plate number', 'warning');
+            correctedPlateInput.focus();
+            return;
+        }
+        
+        savePlateBtn.disabled = true;
+        savePlateBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Saving...';
+        
+        fetch('/save_corrected_plate', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                detected_text: currentDetectedText,
+                corrected_text: correctedText,
+                cropped_plate_path: currentCroppedPlatePath
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            savePlateBtn.disabled = false;
+            savePlateBtn.innerHTML = '<i class="bi bi-save me-2"></i>Save to Database';
+            
+            if (data.success) {
+                document.getElementById('saved-plate-number').textContent = data.plate_number;
+                successModal.show();
+            } else {
+                showAlert(data.message, 'danger');
+            }
+        })
+        .catch(error => {
+            savePlateBtn.disabled = false;
+            savePlateBtn.innerHTML = '<i class="bi bi-save me-2"></i>Save to Database';
+            console.error('Error:', error);
+            showAlert('Error saving plate', 'danger');
+        });
+    });
+    
+    // Reset form
+    resetBtn.addEventListener('click', function() {
+        uploadForm.reset();
+        previewContainer.style.display = 'none';
+        resultsSection.style.display = 'none';
+        currentCroppedPlatePath = '';
+        currentDetectedText = '';
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+    
+    // Show alert
+    function showAlert(message, type) {
+        const alertDiv = document.createElement('div');
+        alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
+        alertDiv.innerHTML = `
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        `;
+        
+        const container = document.querySelector('.container');
+        const firstRow = container.querySelector('.row');
+        container.insertBefore(alertDiv, firstRow);
+        
+        setTimeout(() => {
+            if (alertDiv.parentNode) {
+                alertDiv.remove();
+            }
+        }, 5000);
+    }
+    
+    // Drag and drop
+    const uploadCard = uploadForm.closest('.card-body');
+    
+    uploadCard.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        uploadCard.classList.add('bg-light');
+    });
+    
+    uploadCard.addEventListener('dragleave', function(e) {
+        e.preventDefault();
+        uploadCard.classList.remove('bg-light');
+    });
+    
+    uploadCard.addEventListener('drop', function(e) {
+        e.preventDefault();
+        uploadCard.classList.remove('bg-light');
+        
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            const file = files[0];
+            if (file.type.startsWith('image/')) {
+                imageInput.files = files;
+                imageInput.dispatchEvent(new Event('change'));
+            } else {
+                showAlert('Please drop a valid image file', 'warning');
+            }
+        }
+    });
+});
+</script>
+{% endblock %}
