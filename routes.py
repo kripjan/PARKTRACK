@@ -1,5 +1,5 @@
 """
-Routes module - Dashboard with video upload, separate Parking Spaces page, Video Processing for plate detection
+Routes module - Dashboard with video upload, separate Parking Spaces page, Plate Detector
 """
 import os
 import json
@@ -9,9 +9,10 @@ from flask import render_template, request, redirect, url_for, flash, jsonify, s
 from flask_socketio import emit
 from werkzeug.utils import secure_filename
 from app import app, socketio
-from models import ParkingSpace
+from models import ParkingSpace, Vehicle, DetectionLog
 from services import DashboardService, VideoService, ReportService, ParkingSpaceService
 from parking_manager import ParkingManager
+
 from image_plate_detector import ImagePlateDetector
 
 image_plate_detector = ImagePlateDetector(app.config['UPLOAD_FOLDER'])
@@ -211,75 +212,154 @@ def api_roi_summary():
 
 
 # ============================================================================
-# VIDEO PROCESSING ROUTES (License Plate Detection & OCR)
+# PLATE DETECTOR ROUTES (License Plate Detection & OCR)
 # ============================================================================
 
-@app.route('/video_upload')
-def video_upload():
-    """Video upload page for license plate detection"""
-    return render_template('video_upload.html')
-
-
-@app.route('/upload_video_for_plates', methods=['POST'])
-def upload_video_for_plates():
-    """Handle video file upload for LICENSE PLATE detection (not parking)"""
-    if 'video' not in request.files:
-        return jsonify({'success': False, 'message': 'No video file selected'}), 400
+@app.route('/plate_detector')
+def plate_detector():
+    """Plate Detector page - image-based detection with manual correction"""
+    recent_detections = DetectionLog.query.filter_by(
+        detection_type='license_plate'
+    ).order_by(DetectionLog.timestamp.desc()).limit(20).all()
     
-    file = request.files['video']
-    
-    # Save video file
-    success, message, filepath = video_service.save_video_file(file, app.config['UPLOAD_FOLDER'])
-    
-    if not success:
-        return jsonify({'success': False, 'message': message}), 400
-    
-    # Start processing for LICENSE PLATE detection
-    success, message = video_service.process_video_file(filepath, mode='plates')
-    
-    if success:
-        return jsonify({
-            'success': True,
-            'message': 'Video uploaded successfully and license plate detection started',
-            'filepath': filepath
-        })
-    else:
-        return jsonify({'success': False, 'message': f'Error: {message}'}), 500
+    return render_template('plate_detector.html', recent_detections=recent_detections)
 
 
-@app.route('/api/processing_status')
-def api_processing_status():
-    """Get current video processing status"""
-    status = video_service.get_processing_status()
-    return jsonify(status)
-
-
-@app.route('/api/detected_plates')
-def api_detected_plates():
-    """Get list of detected license plates from current session"""
-    plates = video_service.get_detected_plates()
-    return jsonify({'plates': plates})
-
-
-@app.route('/api/plate_image/<int:plate_id>')
-def api_plate_image(plate_id):
-    """Serve cropped license plate image"""
-    plate_folder = os.path.join(app.config['UPLOAD_FOLDER'], 'detected_plates')
-    
-    # Find the file matching the plate_id (it may have a frame number suffix)
-    pattern = os.path.join(plate_folder, f'plate_{plate_id}_*.jpg')
-    matching_files = glob.glob(pattern)
-    
-    if matching_files:
-        filename = os.path.basename(matching_files[0])
-        return send_from_directory(plate_folder, filename)
-    else:
-        # Try without frame number suffix
-        filename = f'plate_{plate_id}.jpg'
-        if os.path.exists(os.path.join(plate_folder, filename)):
-            return send_from_directory(plate_folder, filename)
+@app.route('/upload_plate_image', methods=['POST'])
+def upload_plate_image():
+    """Handle image upload for plate detection"""
+    try:
+        if 'image' not in request.files:
+            return jsonify({'success': False, 'message': 'No image file uploaded'}), 400
         
-        return jsonify({'error': 'Plate image not found'}), 404
+        file = request.files['image']
+        detection_type = request.form.get('detection_type', 'entry')
+        
+        if file.filename == '':
+            return jsonify({'success': False, 'message': 'No file selected'}), 400
+        
+        # Validate file type
+        allowed_extensions = {'jpg', 'jpeg', 'png', 'bmp'}
+        if not ('.' in file.filename and 
+                file.filename.rsplit('.', 1)[1].lower() in allowed_extensions):
+            return jsonify({'success': False, 'message': 'Invalid file type. Use JPG, PNG, or BMP'}), 400
+        
+        # Save uploaded image
+        filename = secure_filename(file.filename)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f'upload_{timestamp}_{filename}'
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
+        
+        # Process image
+        result = image_plate_detector.process_image(filepath)
+        
+        if not result['success']:
+            return jsonify({
+                'success': False,
+                'message': result['message']
+            }), 400
+        
+        # Prepare response
+        response_data = {
+            'success': True,
+            'message': result['message'],
+            'original_image': url_for('serve_upload', filename=os.path.basename(filepath)),
+            'plate_text': result['plate_text'],
+            'timestamp': result['timestamp'],
+            'detection_type': detection_type
+        }
+        
+        # Add cropped plate URL if available
+        if result['cropped_plate']:
+            response_data['cropped_plate'] = url_for('serve_upload', 
+                filename=f"detected_plates/{os.path.basename(result['cropped_plate'])}")
+            response_data['cropped_plate_path'] = result['cropped_plate']
+        
+        return jsonify(response_data)
+        
+    except Exception as e:
+        app.logger.error(f"Error processing plate image: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/save_corrected_plate', methods=['POST'])
+def save_corrected_plate():
+    """Save manually corrected plate to database"""
+    try:
+        data = request.get_json()
+        
+        detected_text = data.get('detected_text', '')
+        corrected_text = data.get('corrected_text', '')
+        cropped_plate_path = data.get('cropped_plate_path', '')
+        detection_type = data.get('detection_type', 'entry')
+        
+        if not corrected_text:
+            return jsonify({'success': False, 'message': 'No plate text provided'}), 400
+        
+        # Convert URL path back to file path
+        if cropped_plate_path.startswith('/uploads/'):
+            cropped_plate_path = os.path.join(
+                app.config['UPLOAD_FOLDER'], 
+                cropped_plate_path.replace('/uploads/', '')
+            )
+        
+        # Save to database
+        success, message = image_plate_detector.save_to_database(
+            detected_text, 
+            cropped_plate_path, 
+            corrected_text
+        )
+        
+        if success:
+            # Handle entry/exit logic
+            if detection_type == 'entry':
+                parking_manager.handle_vehicle_detection(corrected_text)
+            elif detection_type == 'exit':
+                parking_manager.handle_vehicle_detection(corrected_text)
+            
+            return jsonify({
+                'success': True,
+                'message': message,
+                'plate_number': corrected_text,
+                'detection_type': detection_type
+            })
+        else:
+            return jsonify({'success': False, 'message': message}), 500
+            
+    except Exception as e:
+        app.logger.error(f"Error saving corrected plate: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/recent_detections')
+def api_recent_detections():
+    """Get recent plate detections"""
+    try:
+        detections = DetectionLog.query.filter_by(
+            detection_type='license_plate'
+        ).order_by(DetectionLog.timestamp.desc()).limit(20).all()
+        
+        result = []
+        for detection in detections:
+            result.append({
+                'id': detection.id,
+                'license_plate': detection.license_plate,
+                'confidence': detection.confidence,
+                'timestamp': detection.timestamp.isoformat(),
+                'frame_path': detection.frame_path
+            })
+        
+        return jsonify({'success': True, 'detections': result})
+    except Exception as e:
+        app.logger.error(f"Error fetching recent detections: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/uploads/<path:filename>')
+def serve_upload(filename):
+    """Serve uploaded files"""
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
 
 # ============================================================================
@@ -339,113 +419,6 @@ def broadcast_plate_detection(plate_data):
     socketio.emit('plate_detected', plate_data)
 
 
-
-@app.route('/plate_corrector')
-def plate_corrector():
-    """Plate Corrector page - image-based detection with manual correction"""
-    return render_template('plate_corrector.html')
-
-
-@app.route('/upload_plate_image', methods=['POST'])
-def upload_plate_image():
-    """Handle image upload for plate detection"""
-    try:
-        if 'image' not in request.files:
-            return jsonify({'success': False, 'message': 'No image file uploaded'}), 400
-        
-        file = request.files['image']
-        
-        if file.filename == '':
-            return jsonify({'success': False, 'message': 'No file selected'}), 400
-        
-        # Validate file type
-        allowed_extensions = {'jpg', 'jpeg', 'png', 'bmp'}
-        if not ('.' in file.filename and 
-                file.filename.rsplit('.', 1)[1].lower() in allowed_extensions):
-            return jsonify({'success': False, 'message': 'Invalid file type. Use JPG, PNG, or BMP'}), 400
-        
-        # Save uploaded image
-        filename = secure_filename(file.filename)
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f'upload_{timestamp}_{filename}'
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
-        
-        # Process image
-        result = image_plate_detector.process_image(filepath)
-        
-        if not result['success']:
-            return jsonify({
-                'success': False,
-                'message': result['message']
-            }), 400
-        
-        # Prepare response
-        response_data = {
-            'success': True,
-            'message': result['message'],
-            'original_image': url_for('serve_upload', filename=os.path.basename(filepath)),
-            'plate_text': result['plate_text'],
-            'timestamp': result['timestamp']
-        }
-        
-        # Add cropped plate URL if available
-        if result['cropped_plate']:
-            response_data['cropped_plate'] = url_for('serve_upload', 
-                filename=f"detected_plates/{os.path.basename(result['cropped_plate'])}")
-        
-        return jsonify(response_data)
-        
-    except Exception as e:
-        logger.error(f"Error processing plate image: {e}")
-        return jsonify({'success': False, 'message': str(e)}), 500
-
-
-@app.route('/save_corrected_plate', methods=['POST'])
-def save_corrected_plate():
-    """Save manually corrected plate to database"""
-    try:
-        data = request.get_json()
-        
-        detected_text = data.get('detected_text', '')
-        corrected_text = data.get('corrected_text', '')
-        cropped_plate_path = data.get('cropped_plate_path', '')
-        
-        if not corrected_text:
-            return jsonify({'success': False, 'message': 'No plate text provided'}), 400
-        
-        # Convert URL path back to file path
-        if cropped_plate_path.startswith('/uploads/'):
-            cropped_plate_path = os.path.join(
-                app.config['UPLOAD_FOLDER'], 
-                cropped_plate_path.replace('/uploads/', '')
-            )
-        
-        # Save to database
-        success, message = image_plate_detector.save_to_database(
-            detected_text, 
-            cropped_plate_path, 
-            corrected_text
-        )
-        
-        if success:
-            return jsonify({
-                'success': True,
-                'message': message,
-                'plate_number': corrected_text
-            })
-        else:
-            return jsonify({'success': False, 'message': message}), 500
-            
-    except Exception as e:
-        logger.error(f"Error saving corrected plate: {e}")
-        return jsonify({'success': False, 'message': str(e)}), 500
-
-
-@app.route('/uploads/<path:filename>')
-def serve_upload(filename):
-    """Serve uploaded files"""
-    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 # ============================================================================
 # INITIALIZATION
 # ============================================================================

@@ -1,290 +1,247 @@
-// Video Upload JavaScript - License Plate Detection & OCR
 document.addEventListener('DOMContentLoaded', function() {
     const uploadForm = document.getElementById('uploadForm');
     const uploadBtn = document.getElementById('uploadBtn');
-    const videoInput = document.getElementById('video');
-    const uploadModal = new bootstrap.Modal(document.getElementById('uploadModal'));
-    const plateDetailModal = new bootstrap.Modal(document.getElementById('plateDetailModal'));
-    const uploadProgressBar = document.getElementById('upload-progress-bar');
-    const exportResultsBtn = document.getElementById('export-results-btn');
+    const imageInput = document.getElementById('vehicle-image');
+    const detectionTypeSelect = document.getElementById('detection-type');
+    const imagePreview = document.getElementById('image-preview');
+    const imagePreviewContainer = document.getElementById('image-preview-container');
+    const processingSection = document.getElementById('processing-section');
+    const resultsSection = document.getElementById('results-section');
+    const exitInfoSection = document.getElementById('exit-info-section');
     
-    let detectedPlates = [];
-    let currentProcessingId = null;
+    let currentDetectionData = null;
     
-    // Initialize Socket.IO
-    const socket = io();
+    // Image preview on selection
+    imageInput.addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                imagePreview.src = e.target.result;
+                imagePreviewContainer.style.display = 'block';
+            };
+            reader.readAsDataURL(file);
+        }
+    });
     
-    // Form submission handler
+    // Form submission
     uploadForm.addEventListener('submit', function(e) {
         e.preventDefault();
         
-        const file = videoInput.files[0];
+        const file = imageInput.files[0];
+        const detectionType = detectionTypeSelect.value;
         
         if (!file) {
-            showAlert('Please select a video file', 'warning');
+            showAlert('Please select an image file', 'warning');
             return;
         }
         
-        // Validate file size (100MB limit)
-        if (file.size > 100 * 1024 * 1024) {
-            showAlert('File size exceeds 100MB limit', 'danger');
-            return;
-        }
-        
-        // Show upload modal
-        uploadModal.show();
+        // Show processing
+        processingSection.style.display = 'block';
+        resultsSection.style.display = 'none';
         uploadBtn.disabled = true;
         
         const formData = new FormData();
-        formData.append('video', file);
+        formData.append('image', file);
+        formData.append('type', detectionType);
         
-        // Create XMLHttpRequest for upload progress
-        const xhr = new XMLHttpRequest();
-        
-        xhr.upload.addEventListener('progress', function(e) {
-            if (e.lengthComputable) {
-                const percentComplete = (e.loaded / e.total) * 100;
-                uploadProgressBar.style.width = percentComplete + '%';
-            }
-        });
-        
-        xhr.addEventListener('load', function() {
-            uploadModal.hide();
-            uploadBtn.disabled = false;
+        // Upload and process
+        fetch('/detect_license_plate', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            processingSection.style.display = 'none';
             
-            if (xhr.status === 200) {
-                const response = JSON.parse(xhr.responseText);
-                if (response.success) {
-                    showAlert('Video uploaded successfully! Processing started...', 'success');
-                    uploadForm.reset();
-                    showProcessingStatus();
-                    detectedPlates = [];
-                    updatePlatesDisplay();
-                } else {
-                    showAlert(response.message || 'Error uploading video', 'danger');
-                }
+            if (data.success) {
+                displayResults(data);
             } else {
-                showAlert('Error uploading video. Please try again.', 'danger');
+                showAlert(data.message || 'Error detecting license plate', 'danger');
+                uploadBtn.disabled = false;
             }
-        });
-        
-        xhr.addEventListener('error', function() {
-            uploadModal.hide();
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            processingSection.style.display = 'none';
+            showAlert('Error processing image. Please try again.', 'danger');
             uploadBtn.disabled = false;
-            showAlert('Error uploading video. Please check your connection.', 'danger');
         });
+    });
+    
+    function displayResults(data) {
+        currentDetectionData = data;
         
-        xhr.open('POST', '/upload_video_for_plates');
-        xhr.send(formData);
-    });
-    
-    // File input change handler
-    videoInput.addEventListener('change', function(e) {
-        const file = e.target.files[0];
-        if (file) {
-            const fileSize = (file.size / (1024 * 1024)).toFixed(2);
-            showAlert(`Selected: <strong>${file.name}</strong> (${fileSize} MB)`, 'info');
-        }
-    });
-    
-    // Socket event handlers
-    socket.on('plate_detected', function(data) {
-        console.log('Plate detected:', data);
-        addDetectedPlate(data);
-    });
-    
-    socket.on('new_detection', function(data) {
-        console.log('Detection update:', data);
+        // Show results section
+        resultsSection.style.display = 'block';
         
-        // Handle different types of detection updates
-        if (data.type === 'processing_update') {
-            updateProcessingStatus(data);
-        } else if (data.type === 'processing_complete') {
-            hideProcessingStatus();
-            showAlert(`Processing complete! Detected ${data.plates_detected} license plates with ${data.plates_recognized} successfully recognized.`, 'success');
-            exportResultsBtn.disabled = detectedPlates.length === 0;
-        } else if (data.type === 'error') {
-            hideProcessingStatus();
-            showAlert(`Processing error: ${data.message}`, 'danger');
+        // Display cropped plate image
+        document.getElementById('cropped-plate').src = data.cropped_plate_url;
+        
+        // Display detected plate number
+        const detectedText = data.plate_number || 'Not Recognized';
+        document.getElementById('detected-plate-number').textContent = detectedText;
+        
+        // Pre-fill manual input
+        document.getElementById('manual-plate-number').value = detectedText;
+        
+        // Display confidence
+        const confidence = (data.confidence * 100).toFixed(1);
+        const confidenceBar = document.getElementById('confidence-bar');
+        confidenceBar.style.width = confidence + '%';
+        document.getElementById('confidence-text').textContent = confidence + '%';
+        
+        // Color code confidence
+        confidenceBar.className = 'progress-bar';
+        if (data.confidence >= 0.7) {
+            confidenceBar.classList.add('bg-success');
+        } else if (data.confidence >= 0.4) {
+            confidenceBar.classList.add('bg-warning');
+        } else {
+            confidenceBar.classList.add('bg-danger');
         }
-    });
+        
+        // Display detection type
+        document.getElementById('type-text').textContent = data.detection_type === 'entry' ? 'Entry' : 'Exit';
+        
+        const detectionTypeDisplay = document.getElementById('detection-type-display');
+        if (data.detection_type === 'entry') {
+            detectionTypeDisplay.className = 'alert alert-success';
+            detectionTypeDisplay.innerHTML = '<i class="bi bi-arrow-right-circle me-2"></i>Detection Type: <strong>Entry</strong>';
+        } else {
+            detectionTypeDisplay.className = 'alert alert-warning';
+            detectionTypeDisplay.innerHTML = '<i class="bi bi-arrow-left-circle me-2"></i>Detection Type: <strong>Exit</strong>';
+        }
+        
+        // Show exit information if applicable
+        if (data.detection_type === 'exit' && data.session_info) {
+            exitInfoSection.style.display = 'block';
+            displaySessionInfo(data.session_info);
+        } else {
+            exitInfoSection.style.display = 'none';
+        }
+        
+        uploadBtn.disabled = false;
+    }
     
-    socket.on('processing_error', function(data) {
-        hideProcessingStatus();
-        showAlert(`Processing error: ${data.error}`, 'danger');
-    });
+    function displaySessionInfo(session) {
+        document.getElementById('entry-time').textContent = session.entry_time || 'N/A';
+        document.getElementById('exit-time').textContent = session.exit_time || new Date().toLocaleString();
+        document.getElementById('duration').textContent = session.duration || 'N/A';
+        document.getElementById('parking-space').textContent = session.parking_space || 'Not Assigned';
+        document.getElementById('toll-fee').textContent = 'Rs. ' + (session.toll_fee || 0).toFixed(2);
+    }
     
-    // Export results handler
-    exportResultsBtn.addEventListener('click', function() {
-        if (detectedPlates.length === 0) {
-            showAlert('No plates to export', 'warning');
+    // Save button
+    document.getElementById('save-btn').addEventListener('click', function() {
+        const manualPlateNumber = document.getElementById('manual-plate-number').value.trim();
+        
+        if (!manualPlateNumber) {
+            showAlert('Please enter a license plate number', 'warning');
             return;
         }
         
-        // Create CSV content
-        let csv = 'Plate Number,Confidence,Frame,Timestamp\n';
-        detectedPlates.forEach(plate => {
-            csv += `${plate.plate_number},${plate.confidence},${plate.frame},${plate.timestamp}\n`;
-        });
-        
-        // Download CSV
-        const blob = new Blob([csv], { type: 'text/csv' });
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `license_plates_${new Date().toISOString().slice(0,10)}.csv`;
-        a.click();
-        window.URL.revokeObjectURL(url);
-        
-        showAlert('Results exported successfully!', 'success');
-    });
-    
-    function showProcessingStatus() {
-        const statusDiv = document.getElementById('processing-status');
-        const progressDiv = document.getElementById('processing-progress');
-        
-        statusDiv.classList.add('d-none');
-        progressDiv.classList.remove('d-none');
-        
-        // Reset counters
-        document.getElementById('frames-processed').textContent = '0';
-        document.getElementById('plates-detected').textContent = '0';
-        document.getElementById('plates-recognized').textContent = '0';
-        
-        // Reset progress bar
-        const progressBar = document.getElementById('progress-bar');
-        progressBar.style.width = '0%';
-        document.getElementById('progress-percentage').textContent = '0%';
-    }
-    
-    function hideProcessingStatus() {
-        const statusDiv = document.getElementById('processing-status');
-        const progressDiv = document.getElementById('processing-progress');
-        
-        statusDiv.classList.remove('d-none');
-        progressDiv.classList.add('d-none');
-    }
-    
-    function updateProcessingStatus(data) {
-        if (data.progress !== undefined) {
-            const progressBar = document.getElementById('progress-bar');
-            progressBar.style.width = data.progress + '%';
-            document.getElementById('progress-percentage').textContent = data.progress.toFixed(1) + '%';
-        }
-        
-        if (data.frames_processed !== undefined) {
-            document.getElementById('frames-processed').textContent = data.frames_processed;
-        }
-        
-        if (data.plates_detected !== undefined) {
-            document.getElementById('plates-detected').textContent = data.plates_detected;
-        }
-        
-        if (data.plates_recognized !== undefined) {
-            document.getElementById('plates-recognized').textContent = data.plates_recognized;
-        }
-    }
-    
-    function addDetectedPlate(plateData) {
-        detectedPlates.push(plateData);
-        updatePlatesDisplay();
-        
-        // Update counter
-        document.getElementById('plates-detected').textContent = detectedPlates.length;
-        
-        if (plateData.plate_number) {
-            const recognized = detectedPlates.filter(p => p.plate_number).length;
-            document.getElementById('plates-recognized').textContent = recognized;
-        }
-    }
-    
-    function updatePlatesDisplay() {
-        const container = document.getElementById('detected-plates-container');
-        const grid = document.getElementById('plates-grid');
-        
-        if (detectedPlates.length === 0) {
-            container.style.display = 'block';
-            grid.style.display = 'none';
+        if (!currentDetectionData) {
+            showAlert('No detection data available', 'danger');
             return;
         }
         
-        container.style.display = 'none';
-        grid.style.display = 'flex';
-        grid.innerHTML = '';
-        
-        detectedPlates.forEach((plate, index) => {
-            const card = createPlateCard(plate, index);
-            grid.appendChild(card);
-        });
-        
-        exportResultsBtn.disabled = false;
-    }
-    
-    function createPlateCard(plateData, index) {
-        const col = document.createElement('div');
-        col.className = 'col-md-4 col-lg-3';
-        
-        const confidence = plateData.confidence ? (plateData.confidence * 100).toFixed(1) : 'N/A';
-        const plateNumber = plateData.plate_number || 'Unrecognized';
-        const badgeClass = plateData.plate_number ? 'bg-success' : 'bg-warning text-dark';
-        
-        col.innerHTML = `
-            <div class="card h-100 plate-card" data-plate-id="${index}" style="cursor: pointer;">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-start mb-2">
-                        <span class="badge ${badgeClass}">#${index + 1}</span>
-                        <small class="text-muted">Frame ${plateData.frame || 'N/A'}</small>
-                    </div>
-                    
-                    ${plateData.image_url ? `
-                        <img src="${plateData.image_url}" class="img-fluid rounded mb-2" alt="License Plate">
-                    ` : `
-                        <div class="bg-secondary rounded d-flex align-items-center justify-content-center" style="height: 100px;">
-                            <i class="bi bi-image text-white" style="font-size: 2rem;"></i>
-                        </div>
-                    `}
-                    
-                    <h6 class="card-title mb-1">${plateNumber}</h6>
-                    <small class="text-muted">Confidence: ${confidence}%</small>
-                </div>
-            </div>
-        `;
-        
-        // Add click handler
-        col.querySelector('.plate-card').addEventListener('click', () => {
-            showPlateDetail(plateData, index);
-        });
-        
-        return col;
-    }
-    
-    function showPlateDetail(plateData, index) {
-        // Populate modal
-        if (plateData.image_url) {
-            document.getElementById('modal-plate-image').src = plateData.image_url;
-        }
-        
-        document.getElementById('modal-plate-number').textContent = plateData.plate_number || 'Unrecognized';
-        document.getElementById('modal-confidence').textContent = plateData.confidence 
-            ? (plateData.confidence * 100).toFixed(1) + '%' 
-            : 'N/A';
-        document.getElementById('modal-frame').textContent = plateData.frame || 'N/A';
-        document.getElementById('modal-timestamp').textContent = plateData.timestamp 
-            ? new Date(plateData.timestamp).toLocaleString() 
-            : 'N/A';
-        
-        // Download button
-        const downloadBtn = document.getElementById('download-plate-btn');
-        downloadBtn.onclick = function() {
-            if (plateData.image_url) {
-                const a = document.createElement('a');
-                a.href = plateData.image_url;
-                a.download = `plate_${index + 1}_${plateData.plate_number || 'unknown'}.jpg`;
-                a.click();
-            }
+        // Save to database
+        const saveData = {
+            plate_number: manualPlateNumber,
+            detection_type: currentDetectionData.detection_type,
+            confidence: currentDetectionData.confidence,
+            cropped_plate_path: currentDetectionData.cropped_plate_path,
+            session_id: currentDetectionData.session_id
         };
         
-        plateDetailModal.show();
+        fetch('/save_detection', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(saveData)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showAlert('Detection saved successfully!', 'success');
+                refreshHistory();
+                
+                // Reset form after 2 seconds
+                setTimeout(() => {
+                    resetForm();
+                }, 2000);
+            } else {
+                showAlert(data.message || 'Error saving detection', 'danger');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showAlert('Error saving detection. Please try again.', 'danger');
+        });
+    });
+    
+    // Reset button
+    document.getElementById('reset-btn').addEventListener('click', resetForm);
+    
+    function resetForm() {
+        uploadForm.reset();
+        imagePreviewContainer.style.display = 'none';
+        resultsSection.style.display = 'none';
+        currentDetectionData = null;
+        uploadBtn.disabled = false;
+    }
+    
+    // Refresh history button
+    document.getElementById('refresh-history-btn').addEventListener('click', refreshHistory);
+    
+    function refreshHistory() {
+        fetch('/api/detection_history')
+            .then(response => response.json())
+            .then(data => {
+                const tbody = document.getElementById('history-table-body');
+                tbody.innerHTML = '';
+                
+                if (data.detections && data.detections.length > 0) {
+                    data.detections.forEach(detection => {
+                        const row = createHistoryRow(detection);
+                        tbody.appendChild(row);
+                    });
+                } else {
+                    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No detections yet</td></tr>';
+                }
+            })
+            .catch(error => {
+                console.error('Error refreshing history:', error);
+            });
+    }
+    
+    function createHistoryRow(detection) {
+        const row = document.createElement('tr');
+        
+        const typeClass = detection.type === 'entry' ? 'success' : 'warning';
+        const typeIcon = detection.type === 'entry' ? 'arrow-right-circle' : 'arrow-left-circle';
+        
+        row.innerHTML = `
+            <td>${new Date(detection.timestamp).toLocaleString()}</td>
+            <td><strong class="font-monospace">${detection.plate_number}</strong></td>
+            <td>
+                <span class="badge bg-${typeClass}">
+                    <i class="bi bi-${typeIcon} me-1"></i>
+                    ${detection.type.toUpperCase()}
+                </span>
+            </td>
+            <td>${(detection.confidence * 100).toFixed(1)}%</td>
+            <td><strong>Rs. ${detection.toll_fee ? detection.toll_fee.toFixed(2) : '0.00'}</strong></td>
+            <td>
+                <button class="btn btn-sm btn-outline-primary" onclick="viewDetection(${detection.id})">
+                    <i class="bi bi-eye"></i>
+                </button>
+            </td>
+        `;
+        
+        return row;
     }
     
     function showAlert(message, type) {
@@ -306,50 +263,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }, 5000);
     }
     
-    // Drag and drop
-    const uploadArea = uploadForm.querySelector('.card-body');
-    
-    uploadArea.addEventListener('dragover', function(e) {
-        e.preventDefault();
-        uploadArea.classList.add('bg-light');
-    });
-    
-    uploadArea.addEventListener('dragleave', function(e) {
-        e.preventDefault();
-        uploadArea.classList.remove('bg-light');
-    });
-    
-    uploadArea.addEventListener('drop', function(e) {
-        e.preventDefault();
-        uploadArea.classList.remove('bg-light');
-        
-        const files = e.dataTransfer.files;
-        if (files.length > 0) {
-            const file = files[0];
-            const allowedTypes = ['video/mp4', 'video/avi', 'video/quicktime', 'video/x-msvideo'];
-            if (allowedTypes.includes(file.type) || file.name.match(/\.(mp4|avi|mov|mkv)$/i)) {
-                videoInput.files = files;
-                videoInput.dispatchEvent(new Event('change'));
-            } else {
-                showAlert('Please drop a valid video file', 'warning');
-            }
-        }
-    });
-    
-    // Poll for status updates if processing
-    function checkProcessingStatus() {
-        fetch('/api/processing_status')
-            .then(response => response.json())
-            .then(data => {
-                if (data.is_processing) {
-                    showProcessingStatus();
-                }
-            })
-            .catch(error => {
-                console.error('Error checking status:', error);
-            });
-    }
-    
-    // Check on page load
-    checkProcessingStatus();
+    // Load history on page load
+    refreshHistory();
 });
