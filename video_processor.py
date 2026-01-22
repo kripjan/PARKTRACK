@@ -264,7 +264,7 @@ class VideoProcessor:
                         'occupied': occupied,
                         'available': available
                     },
-                    'timestamp': datetime.utcnow().isoformat()
+                    'timestamp': datetime.now().isoformat()
                 })
                 
         except Exception as e:
@@ -380,7 +380,7 @@ class VideoProcessor:
                     'plate_number': license_plate_text,
                     'confidence': 0.85,
                     'frame': frame_number,
-                    'timestamp': datetime.utcnow().isoformat(),
+                    'timestamp': datetime.now().isoformat(),
                     'image_url': f'/api/plate_image/{self.plates_detected}',
                     'image_path': plate_path
                 }
@@ -393,7 +393,7 @@ class VideoProcessor:
                         detection_type='license_plate',
                         license_plate=license_plate_text,
                         confidence=0.85,
-                        timestamp=datetime.utcnow()
+                        timestamp=datetime.now()
                     )
                     db.session.add(detection)
                     db.session.commit()
@@ -431,7 +431,7 @@ class VideoProcessor:
                             'space_id': space.id,
                             'space_name': space.name,
                             'is_occupied': is_occupied,
-                            'timestamp': datetime.utcnow().isoformat()
+                            'timestamp': datetime.now().isoformat()
                         })
             
             db.session.commit()

@@ -257,13 +257,13 @@ class ImagePlateDetector:
             if not vehicle:
                 vehicle = Vehicle(
                     license_plate=final_plate_text,
-                    first_seen=datetime.utcnow(),
-                    last_seen=datetime.utcnow(),
+                    first_seen=datetime.now(),
+                    last_seen=datetime.now(),
                     total_visits=1
                 )
                 db.session.add(vehicle)
             else:
-                vehicle.last_seen = datetime.utcnow()
+                vehicle.last_seen = datetime.now()
                 vehicle.total_visits += 1
             
             # Create detection log
@@ -272,7 +272,7 @@ class ImagePlateDetector:
                 license_plate=final_plate_text,
                 confidence=1.0 if corrected_text else 0.8,
                 frame_path=os.path.basename(cropped_plate_path),
-                timestamp=datetime.utcnow()
+                timestamp=datetime.now()
             )
             db.session.add(detection_log)
             

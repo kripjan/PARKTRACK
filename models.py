@@ -7,8 +7,8 @@ class Vehicle(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     license_plate = db.Column(db.String(20), unique=True, nullable=False)
-    first_seen = db.Column(db.DateTime, default=datetime.utcnow)
-    last_seen = db.Column(db.DateTime, default=datetime.utcnow)
+    first_seen = db.Column(db.DateTime, default=datetime.now)
+    last_seen = db.Column(db.DateTime, default=datetime.now)
     total_visits = db.Column(db.Integer, default=1)
     
     # Relationships
@@ -27,7 +27,7 @@ class ParkingSpace(db.Model):
     x2 = db.Column(db.Integer, nullable=False)
     y2 = db.Column(db.Integer, nullable=False)
     is_occupied = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now)
     
     parking_sessions = db.relationship('ParkingSession', backref='parking_space', lazy=True)
     
@@ -40,7 +40,7 @@ class ParkingSession(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     vehicle_id = db.Column(db.Integer, db.ForeignKey('vehicles.id'), nullable=False)
     parking_space_id = db.Column(db.Integer, db.ForeignKey('parking_spaces.id'), nullable=True)
-    entry_time = db.Column(db.DateTime, default=datetime.utcnow)
+    entry_time = db.Column(db.DateTime, default=datetime.now)
     exit_time = db.Column(db.DateTime, nullable=True)
     duration_minutes = db.Column(db.Integer, nullable=True)
     toll_amount = db.Column(db.Float, default=0.0)
@@ -67,7 +67,7 @@ class DetectionLog(db.Model):
     __tablename__ = 'detection_logs'
     
     id = db.Column(db.Integer, primary_key=True)
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    timestamp = db.Column(db.DateTime, default=datetime.now)
     detection_type = db.Column(db.String(20), nullable=False)
     license_plate = db.Column(db.String(20), nullable=True)
     confidence = db.Column(db.Float, nullable=True)
@@ -83,7 +83,7 @@ class SystemConfig(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     key = db.Column(db.String(50), unique=True, nullable=False)
     value = db.Column(db.Text, nullable=False)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
     
     def __repr__(self):
         return f'<SystemConfig {self.key}: {self.value}>'

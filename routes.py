@@ -319,7 +319,7 @@ def save_corrected_plate():
             confidence=1.0 if corrected_text != detected_text else 0.8,
             frame_path=os.path.basename(cropped_plate_path) if cropped_plate_path else None,
             vehicle_count=type_code,  # Store entry(1)/exit(2) type here
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now()
         )
         db.session.add(detection)
         

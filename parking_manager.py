@@ -31,7 +31,7 @@ class ParkingManager:
                 self.logger.info(f"New vehicle registered: {license_plate}")
             else:
                 # Update existing vehicle
-                vehicle.last_seen = datetime.utcnow()
+                vehicle.last_seen = datetime.now()
                 vehicle.total_visits += 1
                 self.logger.info(f"Existing vehicle detected: {license_plate}")
             
@@ -66,7 +66,7 @@ class ParkingManager:
             session = ParkingSession(
                 vehicle_id=vehicle.id,
                 parking_space_id=available_space.id if available_space else None,
-                entry_time=datetime.utcnow(),
+                entry_time=datetime.now(),
                 is_active=True
             )
             db.session.add(session)
@@ -84,7 +84,7 @@ class ParkingManager:
                     'type': 'entry',
                     'license_plate': vehicle.license_plate,
                     'space_name': available_space.name if available_space else 'No space assigned',
-                    'timestamp': datetime.utcnow().isoformat()
+                    'timestamp': datetime.now().isoformat()
                 })
             
             self.logger.info(f"Vehicle entry recorded: {vehicle.license_plate}")
@@ -97,7 +97,7 @@ class ParkingManager:
         """Handle vehicle exit from parking area"""
         try:
             # Update session with exit time
-            session.exit_time = datetime.utcnow()
+            session.exit_time = datetime.now()
             session.is_active = False
             
             # Calculate toll
@@ -118,7 +118,7 @@ class ParkingManager:
                     'space_name': space_name,
                     'duration_minutes': session.duration_minutes,
                     'toll_amount': toll_amount,
-                    'timestamp': datetime.utcnow().isoformat()
+                    'timestamp': datetime.now().isoformat()
                 })
             
             self.logger.info(f"Vehicle exit recorded: {session.vehicle.license_plate}, "
@@ -201,7 +201,7 @@ class ParkingManager:
             
             if session:
                 # End the parking session
-                session.exit_time = datetime.utcnow()
+                session.exit_time = datetime.now()
                 session.is_active = False
                 session.calculate_toll()
             
