@@ -181,6 +181,7 @@
                                 <th>#</th>
                                 <th>Timestamp</th>
                                 <th>License Plate</th>
+                                <th>Type</th>
                                 <th>Confidence</th>
                                 <th>Image</th>
                             </tr>
@@ -192,6 +193,19 @@
                                     <td>{{ loop.index }}</td>
                                     <td>{{ detection.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
                                     <td><strong class="font-monospace">{{ detection.license_plate }}</strong></td>
+                                    <td>
+                                        {% if detection.vehicle_count == 1 %}
+                                            <span class="badge bg-success">
+                                                <i class="bi bi-arrow-right-circle me-1"></i>Entry
+                                            </span>
+                                        {% elif detection.vehicle_count == 2 %}
+                                            <span class="badge bg-warning text-dark">
+                                                <i class="bi bi-arrow-left-circle me-1"></i>Exit
+                                            </span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">Unknown</span>
+                                        {% endif %}
+                                    </td>
                                     <td>
                                         {% if detection.confidence %}
                                             <span class="badge {% if detection.confidence >= 0.7 %}bg-success{% elif detection.confidence >= 0.4 %}bg-warning{% else %}bg-danger{% endif %}">
@@ -214,7 +228,7 @@
                                 {% endfor %}
                             {% else %}
                                 <tr>
-                                    <td colspan="5" class="text-center text-muted">No detections yet</td>
+                                    <td colspan="6" class="text-center text-muted">No detections yet</td>
                                 </tr>
                             {% endif %}
                         </tbody>

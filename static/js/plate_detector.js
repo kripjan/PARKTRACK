@@ -151,10 +151,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.getElementById('saved-detection-type').textContent = data.detection_type.toUpperCase();
                 successModal.show();
                 
-                // Refresh table after short delay
-                setTimeout(() => {
-                    refreshDetectionsTable();
-                }, 1000);
+                // Refresh table immediately after save
+                refreshDetectionsTable();
             } else {
                 showAlert(data.message, 'danger');
             }
@@ -209,12 +207,20 @@ document.addEventListener('DOMContentLoaded', function() {
         tbody.innerHTML = '';
         
         if (detections.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No detections yet</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No detections yet</td></tr>';
             return;
         }
         
         detections.forEach((detection, index) => {
             const row = document.createElement('tr');
+            
+            // Type badge - now properly using detection_type from API
+            let typeBadge = '<span class="badge bg-secondary">Unknown</span>';
+            if (detection.detection_type === 'entry') {
+                typeBadge = '<span class="badge bg-success"><i class="bi bi-arrow-right-circle me-1"></i>Entry</span>';
+            } else if (detection.detection_type === 'exit') {
+                typeBadge = '<span class="badge bg-warning text-dark"><i class="bi bi-arrow-left-circle me-1"></i>Exit</span>';
+            }
             
             // Confidence badge
             let confidenceBadge = '<span class="badge bg-secondary">N/A</span>';
@@ -233,6 +239,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 <td>${index + 1}</td>
                 <td>${timestamp}</td>
                 <td><strong class="font-monospace">${detection.license_plate}</strong></td>
+                <td>${typeBadge}</td>
                 <td>${confidenceBadge}</td>
                 <td>
                     ${detection.frame_path ? 

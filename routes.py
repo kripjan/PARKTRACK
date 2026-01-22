@@ -8,7 +8,7 @@ from datetime import datetime
 from flask import render_template, request, redirect, url_for, flash, jsonify, send_from_directory
 from flask_socketio import emit
 from werkzeug.utils import secure_filename
-from app import app, socketio
+from app import app, socketio, db
 from models import ParkingSpace, Vehicle, DetectionLog
 from services import DashboardService, VideoService, ReportService, ParkingSpaceService
 from parking_manager import ParkingManager
@@ -218,11 +218,16 @@ def api_roi_summary():
 @app.route('/plate_detector')
 def plate_detector():
     """Plate Detector page - image-based detection with manual correction"""
-    recent_detections = DetectionLog.query.filter_by(
+    detections = DetectionLog.query.filter_by(
         detection_type='license_plate'
     ).order_by(DetectionLog.timestamp.desc()).limit(20).all()
     
-    return render_template('plate_detector.html', recent_detections=recent_detections)
+    # Add proper detection_type decoding for template rendering
+    for detection in detections:
+        # Decode from vehicle_count: 1=entry, 2=exit
+        detection.entry_exit_type = 'entry' if detection.vehicle_count == 1 else 'exit' if detection.vehicle_count == 2 else 'unknown'
+    
+    return render_template('plate_detector.html', recent_detections=detections)
 
 
 @app.route('/upload_plate_image', methods=['POST'])
@@ -304,31 +309,41 @@ def save_corrected_plate():
                 cropped_plate_path.replace('/uploads/', '')
             )
         
-        # Save to database
-        success, message = image_plate_detector.save_to_database(
-            detected_text, 
-            cropped_plate_path, 
-            corrected_text
-        )
+        # Convert detection_type to vehicle_count: 1 for entry, 2 for exit
+        type_code = 1 if detection_type == 'entry' else 2
         
-        if success:
-            # Handle entry/exit logic
-            if detection_type == 'entry':
-                parking_manager.handle_vehicle_detection(corrected_text)
-            elif detection_type == 'exit':
-                parking_manager.handle_vehicle_detection(corrected_text)
-            
-            return jsonify({
-                'success': True,
-                'message': message,
-                'plate_number': corrected_text,
-                'detection_type': detection_type
-            })
-        else:
-            return jsonify({'success': False, 'message': message}), 500
+        # Save detection log with detection_type stored in vehicle_count field
+        detection = DetectionLog(
+            detection_type='license_plate',
+            license_plate=corrected_text,
+            confidence=1.0 if corrected_text != detected_text else 0.8,
+            frame_path=os.path.basename(cropped_plate_path) if cropped_plate_path else None,
+            vehicle_count=type_code,  # Store entry(1)/exit(2) type here
+            timestamp=datetime.utcnow()
+        )
+        db.session.add(detection)
+        
+        # Commit the detection log first
+        db.session.commit()
+        
+        # Now handle parking session in a separate transaction
+        try:
+            parking_manager.handle_vehicle_detection(corrected_text)
+        except Exception as parking_error:
+            # Log the error but don't fail the entire operation
+            app.logger.error(f"Error in parking manager: {parking_error}")
+            # The detection is already saved, so we can continue
+        
+        return jsonify({
+            'success': True,
+            'message': f'Plate {corrected_text} saved successfully as {detection_type}',
+            'plate_number': corrected_text,
+            'detection_type': detection_type
+        })
             
     except Exception as e:
         app.logger.error(f"Error saving corrected plate: {e}")
+        db.session.rollback()
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
@@ -342,12 +357,16 @@ def api_recent_detections():
         
         result = []
         for detection in detections:
+            # Decode type from vehicle_count field (1=entry, 2=exit)
+            det_type = 'entry' if detection.vehicle_count == 1 else 'exit' if detection.vehicle_count == 2 else 'unknown'
+            
             result.append({
                 'id': detection.id,
                 'license_plate': detection.license_plate,
                 'confidence': detection.confidence,
                 'timestamp': detection.timestamp.isoformat(),
-                'frame_path': detection.frame_path
+                'frame_path': detection.frame_path,
+                'detection_type': det_type  # Now correctly decoded
             })
         
         return jsonify({'success': True, 'detections': result})
@@ -373,10 +392,24 @@ def reports():
     hourly_occupancy = report_service.get_hourly_occupancy()
     top_vehicles = report_service.get_top_vehicles(limit=10)
     
+    # Add plate detection statistics
+    total_plate_detections = DetectionLog.query.filter_by(detection_type='license_plate').count()
+    entry_detections = DetectionLog.query.filter_by(detection_type='license_plate', vehicle_count=1).count()
+    exit_detections = DetectionLog.query.filter_by(detection_type='license_plate', vehicle_count=2).count()
+    
+    # Get recent plate detections for quick view
+    recent_plates = DetectionLog.query.filter_by(
+        detection_type='license_plate'
+    ).order_by(DetectionLog.timestamp.desc()).limit(5).all()
+    
     return render_template('reports.html',
                          daily_revenue=daily_revenue,
                          hourly_occupancy=hourly_occupancy,
-                         top_vehicles=top_vehicles)
+                         top_vehicles=top_vehicles,
+                         total_plate_detections=total_plate_detections,
+                         entry_detections=entry_detections,
+                         exit_detections=exit_detections,
+                         recent_plates=recent_plates)
 
 
 @app.route('/api/revenue_summary')

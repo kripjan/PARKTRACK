@@ -20,40 +20,41 @@ class ParkingManager:
             license_plate (str): Detected license plate
         """
         try:
-            with db.session.begin():
-                # Find or create vehicle record
-                vehicle = Vehicle.query.filter_by(license_plate=license_plate).first()
-                
-                if not vehicle:
-                    # New vehicle
-                    vehicle = Vehicle(license_plate=license_plate)
-                    db.session.add(vehicle)
-                    db.session.flush()  # To get the ID
-                    self.logger.info(f"New vehicle registered: {license_plate}")
-                else:
-                    # Update existing vehicle
-                    vehicle.last_seen = datetime.utcnow()
-                    vehicle.total_visits += 1
-                    self.logger.info(f"Existing vehicle detected: {license_plate}")
-                
-                # Check if vehicle has an active parking session
-                active_session = ParkingSession.query.filter_by(
-                    vehicle_id=vehicle.id,
-                    is_active=True
-                ).first()
-                
-                if active_session:
-                    # Vehicle is exiting
-                    self._handle_vehicle_exit(active_session)
-                else:
-                    # Vehicle is entering
-                    self._handle_vehicle_entry(vehicle)
-                
-                db.session.commit()
+            # Find or create vehicle record
+            vehicle = Vehicle.query.filter_by(license_plate=license_plate).first()
+            
+            if not vehicle:
+                # New vehicle
+                vehicle = Vehicle(license_plate=license_plate)
+                db.session.add(vehicle)
+                db.session.flush()  # To get the ID
+                self.logger.info(f"New vehicle registered: {license_plate}")
+            else:
+                # Update existing vehicle
+                vehicle.last_seen = datetime.utcnow()
+                vehicle.total_visits += 1
+                self.logger.info(f"Existing vehicle detected: {license_plate}")
+            
+            # Check if vehicle has an active parking session
+            active_session = ParkingSession.query.filter_by(
+                vehicle_id=vehicle.id,
+                is_active=True
+            ).first()
+            
+            if active_session:
+                # Vehicle is exiting
+                self._handle_vehicle_exit(active_session)
+            else:
+                # Vehicle is entering
+                self._handle_vehicle_entry(vehicle)
+            
+            # Commit all changes
+            db.session.commit()
                 
         except Exception as e:
             self.logger.error(f"Error handling vehicle detection: {e}")
             db.session.rollback()
+            raise
     
     def _handle_vehicle_entry(self, vehicle):
         """Handle vehicle entry to parking area"""
@@ -121,7 +122,7 @@ class ParkingManager:
                 })
             
             self.logger.info(f"Vehicle exit recorded: {session.vehicle.license_plate}, "
-                           f"Duration: {session.duration_minutes} min, Toll: ${toll_amount:.2f}")
+                           f"Duration: {session.duration_minutes} min, Toll: Rs. {toll_amount:.2f}")
             
         except Exception as e:
             self.logger.error(f"Error handling vehicle exit: {e}")
@@ -154,32 +155,31 @@ class ParkingManager:
     def assign_parking_space(self, vehicle_id, space_id):
         """Manually assign a parking space to a vehicle"""
         try:
-            with db.session.begin():
-                space = ParkingSpace.query.get(space_id)
-                if not space:
-                    raise ValueError(f"Parking space {space_id} not found")
-                
-                if space.is_occupied:
-                    raise ValueError(f"Parking space {space.name} is already occupied")
-                
-                # Find active session for vehicle
-                session = ParkingSession.query.filter_by(
-                    vehicle_id=vehicle_id,
-                    is_active=True
-                ).first()
-                
-                if not session:
-                    raise ValueError(f"No active parking session found for vehicle")
-                
-                # Update session and space
-                session.parking_space_id = space_id
-                space.is_occupied = True
-                
-                db.session.commit()
-                
-                self.logger.info(f"Manually assigned space {space.name} to vehicle {session.vehicle.license_plate}")
-                
-                return True
+            space = ParkingSpace.query.get(space_id)
+            if not space:
+                raise ValueError(f"Parking space {space_id} not found")
+            
+            if space.is_occupied:
+                raise ValueError(f"Parking space {space.name} is already occupied")
+            
+            # Find active session for vehicle
+            session = ParkingSession.query.filter_by(
+                vehicle_id=vehicle_id,
+                is_active=True
+            ).first()
+            
+            if not session:
+                raise ValueError(f"No active parking session found for vehicle")
+            
+            # Update session and space
+            session.parking_space_id = space_id
+            space.is_occupied = True
+            
+            db.session.commit()
+            
+            self.logger.info(f"Manually assigned space {space.name} to vehicle {session.vehicle.license_plate}")
+            
+            return True
                 
         except Exception as e:
             self.logger.error(f"Error assigning parking space: {e}")
@@ -189,31 +189,30 @@ class ParkingManager:
     def release_parking_space(self, space_id):
         """Manually release a parking space"""
         try:
-            with db.session.begin():
-                space = ParkingSpace.query.get(space_id)
-                if not space:
-                    raise ValueError(f"Parking space {space_id} not found")
-                
-                # Find active session in this space
-                session = ParkingSession.query.filter_by(
-                    parking_space_id=space_id,
-                    is_active=True
-                ).first()
-                
-                if session:
-                    # End the parking session
-                    session.exit_time = datetime.utcnow()
-                    session.is_active = False
-                    session.calculate_toll()
-                
-                # Free the space
-                space.is_occupied = False
-                
-                db.session.commit()
-                
-                self.logger.info(f"Manually released parking space {space.name}")
-                
-                return True
+            space = ParkingSpace.query.get(space_id)
+            if not space:
+                raise ValueError(f"Parking space {space_id} not found")
+            
+            # Find active session in this space
+            session = ParkingSession.query.filter_by(
+                parking_space_id=space_id,
+                is_active=True
+            ).first()
+            
+            if session:
+                # End the parking session
+                session.exit_time = datetime.utcnow()
+                session.is_active = False
+                session.calculate_toll()
+            
+            # Free the space
+            space.is_occupied = False
+            
+            db.session.commit()
+            
+            self.logger.info(f"Manually released parking space {space.name}")
+            
+            return True
                 
         except Exception as e:
             self.logger.error(f"Error releasing parking space: {e}")
