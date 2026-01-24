@@ -21,9 +21,9 @@
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
                         <h3 class="card-title text-white mb-1" id="total-revenue">
-                            Rs. {% set total = 0 %}{% for item in daily_revenue %}{% set total = total + item['revenue'] %}{% endfor %}{{ "%.2f"|format(total) }}
+                            Rs. {{ "%.2f"|format(today_revenue) }}
                         </h3>
-                        <p class="card-text text-white-50 mb-0">7-Day Revenue</p>
+                        <p class="card-text text-white-50 mb-0">Today's Revenue</p>
                     </div>
                     <i class="bi bi-currency-rupee text-white" style="font-size: 2rem;"></i>
                 </div>
@@ -51,7 +51,7 @@
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
                         <h3 class="card-title text-white mb-1">
-                            Rs. {% if daily_revenue|length > 0 %}{% set total = 0 %}{% for item in daily_revenue %}{% set total = total + item['revenue'] %}{% endfor %}{{ "%.2f"|format(total / daily_revenue|length) }}{% else %}0.00{% endif %}
+                            Rs. {{ "%.2f"|format(avg_daily_revenue) }}
                         </h3>
                         <p class="card-text text-white-50 mb-0">Avg Daily Revenue</p>
                     </div>
@@ -66,9 +66,7 @@
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
-                        <h3 class="card-title text-dark mb-1">
-                            {% set total_count = 0 %}{% for item in hourly_occupancy %}{% set total_count = total_count + item['count'] %}{% endfor %}{{ total_count }}
-                        </h3>
+                        <h3 class="card-title text-dark mb-1">{{ total_entries_today }}</h3>
                         <p class="card-text text-dark mb-0">Today's Entries</p>
                     </div>
                     <i class="bi bi-car-front-fill text-dark" style="font-size: 2rem;"></i>

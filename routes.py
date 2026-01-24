@@ -387,30 +387,37 @@ def serve_upload(filename):
 
 @app.route('/reports')
 def reports():
-    """Reports and analytics page"""
+    """Reports and analytics page with improved data calculation"""
+    # Get report data
     daily_revenue = report_service.get_daily_revenue(days=7)
     hourly_occupancy = report_service.get_hourly_occupancy()
     top_vehicles = report_service.get_top_vehicles(limit=10)
     
-    # Add plate detection statistics
-    total_plate_detections = DetectionLog.query.filter_by(detection_type='license_plate').count()
-    entry_detections = DetectionLog.query.filter_by(detection_type='license_plate', vehicle_count=1).count()
-    exit_detections = DetectionLog.query.filter_by(detection_type='license_plate', vehicle_count=2).count()
+    # Calculate today's revenue (instead of 7-day total)
+    from datetime import datetime
+    today = datetime.now().date()
+    today_revenue = next(
+        (item['revenue'] for item in daily_revenue if item['date'] == today),
+        0.0
+    )
     
-    # Get recent plate detections for quick view
-    recent_plates = DetectionLog.query.filter_by(
-        detection_type='license_plate'
-    ).order_by(DetectionLog.timestamp.desc()).limit(5).all()
+    # Calculate 7-day total for average calculation
+    total_7day_revenue = sum(item['revenue'] for item in daily_revenue)
+    avg_daily_revenue = total_7day_revenue / 7 if daily_revenue else 0
+    
+    # Get total entries from hourly occupancy
+    total_entries_today = sum(item['count'] for item in hourly_occupancy)
+    
+    # Log for debugging
+    app.logger.info(f"Reports - Today's revenue: {today_revenue}, Avg daily: {avg_daily_revenue}, Entries today: {total_entries_today}")
     
     return render_template('reports.html',
                          daily_revenue=daily_revenue,
                          hourly_occupancy=hourly_occupancy,
                          top_vehicles=top_vehicles,
-                         total_plate_detections=total_plate_detections,
-                         entry_detections=entry_detections,
-                         exit_detections=exit_detections,
-                         recent_plates=recent_plates)
-
+                         today_revenue=today_revenue,  # Changed variable name
+                         avg_daily_revenue=avg_daily_revenue,
+                         total_entries_today=total_entries_today)
 
 @app.route('/api/revenue_summary')
 def api_revenue_summary():

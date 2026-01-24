@@ -17,17 +17,21 @@ class ReportService:
     def get_daily_revenue(self, days=7):
         """
         Get daily revenue for the specified number of days
+        Fills in missing days with Rs. 0.00 to show complete timeline
         
         Args:
             days (int): Number of days to look back (default: 7)
             
         Returns:
-            list: List of dictionaries with 'date' and 'revenue' keys
+            list: List of dictionaries with 'date' and 'revenue' keys for ALL days
         """
         try:
-            end_date = datetime.utcnow()
-            start_date = end_date - timedelta(days=days)
+            from datetime import datetime, timedelta
             
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=days-1)  # Include today
+            
+            # Query database for days with revenue
             results = db.session.query(
                 func.date(ParkingSession.exit_time).label('date'),
                 func.sum(ParkingSession.toll_amount).label('revenue')
@@ -36,13 +40,22 @@ class ReportService:
                 ParkingSession.is_active == False
             ).group_by(func.date(ParkingSession.exit_time)).all()
             
-            # Convert to list of dictionaries for easier template access
-            daily_revenue = []
+            # Convert results to dictionary for easy lookup
+            revenue_by_date = {}
             for row in results:
+                revenue_by_date[row.date] = float(row.revenue) if row.revenue else 0.0
+            
+            # Generate complete list of all days in range
+            daily_revenue = []
+            current_date = start_date.date()
+            end = end_date.date()
+            
+            while current_date <= end:
                 daily_revenue.append({
-                    'date': row.date,
-                    'revenue': float(row.revenue) if row.revenue else 0.0
+                    'date': current_date,
+                    'revenue': revenue_by_date.get(current_date, 0.0)  # Use 0.0 if no data
                 })
+                current_date += timedelta(days=1)
             
             return daily_revenue
             
@@ -53,6 +66,7 @@ class ReportService:
     def get_hourly_occupancy(self, date=None):
         """
         Get hourly occupancy data for a specific date
+        Counts license plate detections as entries
         
         Args:
             date (datetime.date, optional): Date to get occupancy for (default: today)
@@ -62,14 +76,16 @@ class ReportService:
         """
         try:
             if date is None:
-                date = datetime.utcnow().date()
+                date = datetime.now().date()
             
+            # Count license_plate detections (from Plate Corrector)
+            # OR entry detections (from video processing)
             results = db.session.query(
                 func.extract('hour', DetectionLog.timestamp).label('hour'),
                 func.count(DetectionLog.id).label('count')
             ).filter(
                 func.date(DetectionLog.timestamp) == date,
-                DetectionLog.detection_type == 'entry'
+                DetectionLog.detection_type.in_(['license_plate', 'entry'])  # Count both types
             ).group_by(func.extract('hour', DetectionLog.timestamp)).all()
             
             # Convert to list of dictionaries for easier template access
@@ -182,7 +198,7 @@ class ReportService:
         """
         try:
             if date is None:
-                date = datetime.utcnow().date()
+                date = datetime.now().date()
             
             hourly_data = self.get_hourly_occupancy(date)
             
@@ -210,7 +226,7 @@ class ReportService:
             dict: Dictionary containing revenue summary
         """
         try:
-            end_date = datetime.utcnow()
+            end_date = datetime.now()
             start_date = end_date - timedelta(days=days)
             
             total_revenue = self.get_total_revenue(start_date, end_date)
@@ -220,7 +236,7 @@ class ReportService:
             avg_daily_revenue = total_revenue / days if days > 0 else 0
             
             # Get today's revenue
-            today = datetime.utcnow().date()
+            today = datetime.now().date()
             today_revenue = self.get_total_revenue(
                 datetime.combine(today, datetime.min.time()),
                 datetime.combine(today, datetime.max.time())
@@ -288,7 +304,7 @@ class ReportService:
             dict: Dictionary containing detection statistics
         """
         try:
-            end_date = datetime.utcnow()
+            end_date = datetime.now()
             start_date = end_date - timedelta(days=days)
             
             total_detections = DetectionLog.query.filter(
