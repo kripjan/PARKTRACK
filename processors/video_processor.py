@@ -15,9 +15,9 @@ except ImportError:
     CV_AVAILABLE = False
     
 from models import DetectionLog, ParkingSpace, Vehicle, ParkingSession
-from license_plate_detector import LicensePlateDetector
-from parking_manager import ParkingManager
-from parking_detector import ParkingDetector
+from detectors.license_plate_detector import LicensePlateDetector
+from services.parking_manager import ParkingManager
+from detectors.parking_detector import ParkingDetector
 
 
 class VideoProcessor:

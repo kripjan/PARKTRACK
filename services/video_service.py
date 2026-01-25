@@ -4,8 +4,8 @@ Video service - License Plate Detection, Cropping, and OCR
 import os
 import logging
 from werkzeug.utils import secure_filename
-from video_processor import VideoProcessor
-from parking_detector import ParkingDetector
+from processors.video_processor import VideoProcessor
+from detectors.parking_detector import ParkingDetector
 
 
 class VideoService:

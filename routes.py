@@ -11,9 +11,9 @@ from werkzeug.utils import secure_filename
 from app import app, socketio, db
 from models import ParkingSpace, Vehicle, DetectionLog
 from services import DashboardService, VideoService, ReportService, ParkingSpaceService
-from parking_manager import ParkingManager
+from services import ParkingManager
 
-from image_plate_detector import ImagePlateDetector
+from detectors import ImagePlateDetector
 
 image_plate_detector = ImagePlateDetector(app.config['UPLOAD_FOLDER'])
 
