@@ -359,7 +359,7 @@ class VideoProcessor:
         """Detect license plate in vehicle ROI and save it"""
         try:
             # Use license plate detector
-            license_plate_text = self.lp_detector.detect_license_plate(vehicle_roi)
+            license_plate_text = self.lp_detector.detect_from_roi(vehicle_roi)
             
             if license_plate_text:
                 self.plates_detected += 1

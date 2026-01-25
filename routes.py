@@ -13,9 +13,8 @@ from models import ParkingSpace, Vehicle, DetectionLog
 from services import DashboardService, VideoService, ReportService, ParkingSpaceService
 from services import ParkingManager
 
-from detectors import ImagePlateDetector
-
-image_plate_detector = ImagePlateDetector(app.config['UPLOAD_FOLDER'])
+from detectors.license_plate_detector import LicensePlateDetector
+license_plate_detector = LicensePlateDetector(app.config['UPLOAD_FOLDER'])
 
 # Initialize services
 dashboard_service = DashboardService()
@@ -257,7 +256,7 @@ def upload_plate_image():
         file.save(filepath)
         
         # Process image
-        result = image_plate_detector.process_image(filepath)
+        result = license_plate_detector.detect_from_image(filepath, save_cropped=True)
         
         if not result['success']:
             return jsonify({
@@ -272,14 +271,17 @@ def upload_plate_image():
             'original_image': url_for('serve_upload', filename=os.path.basename(filepath)),
             'plate_text': result['plate_text'],
             'timestamp': result['timestamp'],
-            'detection_type': detection_type
+            'detection_type': detection_type,
+            'cropped_plate_path': result.get('cropped_plate_path','') 
         }
         
         # Add cropped plate URL if available
-        if result['cropped_plate']:
+        if result.get('cropped_plate_path'):
+            cropped_filename = os.path.basename(result['cropped_plate_path'])
             response_data['cropped_plate'] = url_for('serve_upload', 
-                filename=f"detected_plates/{os.path.basename(result['cropped_plate'])}")
-            response_data['cropped_plate_path'] = result['cropped_plate']
+                filename=f"detected_plates/{cropped_filename}")
+        else:
+            response_data['cropped_plate'] = None  # ✅ Explicit None
         
         return jsonify(response_data)
         
