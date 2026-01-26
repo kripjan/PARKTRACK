@@ -59,7 +59,7 @@ class DashboardService:
         Returns:
             float: Total revenue for today
         """
-        today = datetime.utcnow().date()
+        today = datetime.now().date()
         revenue = db.session.query(func.sum(ParkingSession.toll_amount)).filter(
             func.date(ParkingSession.exit_time) == today,
             ParkingSession.is_active == False
@@ -100,7 +100,7 @@ class DashboardService:
         Returns:
             dict: Dictionary containing hours and minutes
         """
-        now = datetime.utcnow()
+        now = datetime.now()
         duration = now - entry_time
         total_minutes = int(duration.total_seconds() / 60)
         hours = total_minutes // 60

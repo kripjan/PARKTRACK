@@ -103,12 +103,10 @@ class VideoProcessor:
         self.logger.info(f"Started processing video file: {filepath} in {mode} mode")
     
     def _process_video_file(self, filepath):
-        """Internal method to process video file - WRAPPED IN APP CONTEXT"""
-        # CRITICAL: Wrap entire processing in app context
         with app.app_context():
             if not CV_AVAILABLE:
-                self.logger.warning("Computer vision not available - using mock video processing")
-                self._mock_video_processing(filepath)
+                self.logger.error("Computer vision libraries not available. Cannot process video.")
+                self.is_processing = False
                 return
             
             # Choose processing method based on mode
@@ -465,11 +463,6 @@ class VideoProcessor:
                 completion_data['output_video'] = os.path.basename(output_path)
             
             self.broadcast_detection(completion_data)
-    
-    def _mock_video_processing(self, filepath):
-        """Mock video processing when CV is not available"""
-        self.logger.info("Running mock video processing")
-        self.is_processing = False
     
     def get_detected_plates(self):
         """Get list of detected plates"""
