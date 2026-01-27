@@ -317,39 +317,38 @@ class LicensePlateDetector:
                 # Extract y-centers of all characters
                 y_centers = np.array([c['y'] for c in characters]).reshape(-1, 1)
                 
-                # Decide number of rows: 1 if y spread is small, else 2
-                y_range = y_centers.max() - y_centers.min()
-                avg_char_height = np.mean([c['box'][3] - c['box'][1] for c in characters])
-                
-                if y_range < 1.5 * avg_char_height:
-                    # Single row plate: simple left-to-right sorting
+                # ---- ROW SEPARATION ----
+                y_vals = np.array([c['y'] for c in characters])
+                h_vals = np.array([c['box'][3] - c['box'][1] for c in characters])
+
+                y_range = y_vals.max() - y_vals.min()
+                avg_h = np.mean(h_vals)
+
+                if y_range < 1.2 * avg_h:
+                    # ---- SINGLE ROW ----
                     characters.sort(key=lambda c: c['x'])
-                    plate_text = ''.join([c['char'] for c in characters])
+                    plate_text = ''.join(c['char'] for c in characters)
+
                 else:
-                    # Multi-row plate: cluster into 2 rows
-                    n_rows = 2
-                    kmeans = KMeans(n_clusters=n_rows, random_state=0, n_init=10).fit(y_centers)
-                    labels = kmeans.labels_
-                    
-                    # Group characters into rows
-                    rows = [[] for _ in range(n_rows)]
-                    for c, label in zip(characters, labels):
-                        rows[label].append(c)
-                    
-                    # Sort characters within each row left-to-right
-                    for row in rows:
-                        row.sort(key=lambda c: c['x'])
-                    
-                    # Sort rows top-to-bottom (by average y of row)
-                    rows.sort(key=lambda r: np.mean([c['y'] for c in r]))
-                    
-                    # Build final plate text
-                    plate_text = ''
-                    for row in rows:
-                        plate_text += ''.join([c['char'] for c in row])
-            
-            self.logger.info(f"OCR result: {plate_text}")
-            return plate_text, characters
+                    # ---- TWO ROW (NEPALI PLATE) ----
+                    median_y = np.median(y_vals)
+
+                    top_row = [c for c in characters if c['y'] <= median_y]
+                    bottom_row = [c for c in characters if c['y'] > median_y]
+
+                    # safety: if split went wrong, fallback
+                    if len(top_row) == 0 or len(bottom_row) == 0:
+                        characters.sort(key=lambda c: (c['y'], c['x']))
+                        plate_text = ''.join(c['char'] for c in characters)
+                    else:
+                        top_row.sort(key=lambda c: c['x'])
+                        bottom_row.sort(key=lambda c: c['x'])
+
+                        plate_text = ''.join(c['char'] for c in top_row) + ''.join(c['char'] for c in bottom_row)
+
+                
+                self.logger.info(f"OCR result: {plate_text}")
+                return plate_text, characters
             
         except Exception as e:
             self.logger.error(f"Error performing OCR: {e}")
