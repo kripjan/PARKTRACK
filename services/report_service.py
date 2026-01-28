@@ -66,7 +66,7 @@ class ReportService:
     def get_hourly_occupancy(self, date=None):
         """
         Get hourly occupancy data for a specific date
-        Counts license plate detections as entries
+        Counts ONLY vehicle entries (not exits)
         
         Args:
             date (datetime.date, optional): Date to get occupancy for (default: today)
@@ -76,16 +76,23 @@ class ReportService:
         """
         try:
             if date is None:
-                date = datetime.now().date()
+                date = datetime.utcnow().date()
             
-            # Count license_plate detections (from Plate Corrector)
-            # OR entry detections (from video processing)
+            # Count ONLY entries:
+            # 1. detection_type='entry' (from video processing)
+            # 2. detection_type='license_plate' AND vehicle_count=1 (from Plate Corrector entries)
             results = db.session.query(
                 func.extract('hour', DetectionLog.timestamp).label('hour'),
                 func.count(DetectionLog.id).label('count')
             ).filter(
                 func.date(DetectionLog.timestamp) == date,
-                DetectionLog.detection_type.in_(['license_plate', 'entry'])  # Count both types
+                db.or_(
+                    DetectionLog.detection_type == 'entry',  # Video-based entries
+                    db.and_(
+                        DetectionLog.detection_type == 'license_plate',  # Manual detections
+                        DetectionLog.vehicle_count == 1  # Where type is 'entry' (encoded as 1)
+                    )
+                )
             ).group_by(func.extract('hour', DetectionLog.timestamp)).all()
             
             # Convert to list of dictionaries for easier template access
