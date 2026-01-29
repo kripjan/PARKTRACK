@@ -46,17 +46,17 @@ class LicensePlateDetector:
             plate_model_path = 'model/license_plate.pt'
             if os.path.exists(plate_model_path):
                 self.plate_detector = YOLO(plate_model_path)
-                self.logger.info("✓ License plate detection model loaded")
+                self.logger.info("âœ“ License plate detection model loaded")
             else:
-                self.logger.error(f"✗ Plate model not found: {plate_model_path}")
+                self.logger.error(f"âœ— Plate model not found: {plate_model_path}")
             
             # Nepali OCR model
             ocr_model_path = 'model/nepali_lp.pt'
             if os.path.exists(ocr_model_path):
                 self.ocr_model = YOLO(ocr_model_path)
-                self.logger.info("✓ Nepali OCR model loaded")
+                self.logger.info("âœ“ Nepali OCR model loaded")
             else:
-                self.logger.error(f"✗ OCR model not found: {ocr_model_path}")
+                self.logger.error(f"âœ— OCR model not found: {ocr_model_path}")
                 
         except Exception as e:
             self.logger.error(f"Error loading models: {e}")
@@ -277,82 +277,79 @@ class LicensePlateDetector:
     def _perform_ocr(self, cropped_plate):
         """
         Perform OCR on cropped plate using Nepali model
-        
+
         Returns:
             tuple: (plate_text, character_details)
         """
         if self.ocr_model is None:
             return '', []
-        
+
         try:
             results = self.ocr_model(cropped_plate, conf=0.25, verbose=False)
-            
+
             if len(results) == 0 or results[0].boxes is None or len(results[0].boxes) == 0:
                 return '', []
-            
-            # Extract characters with positions
+
+            # -------- EXTRACT DETECTIONS --------
             boxes = results[0].boxes.xyxy.cpu().numpy()
             confidences = results[0].boxes.conf.cpu().numpy()
             classes = results[0].boxes.cls.cpu().numpy()
             class_names = results[0].names
-            
-            # Build character list
+
             characters = []
             for box, conf, cls in zip(boxes, confidences, classes):
                 x1, y1, x2, y2 = box
                 center_x = (x1 + x2) / 2
                 center_y = (y1 + y2) / 2
-                
+
                 characters.append({
                     'char': class_names[int(cls)],
                     'confidence': float(conf),
                     'x': float(center_x),
                     'y': float(center_y),
+                    'top_y': float(y1),   # IMPORTANT FOR ROW CLUSTERING
                     'box': [float(x1), float(y1), float(x2), float(y2)]
                 })
-            
+
             if len(characters) == 0:
-                plate_text = ''
+                return '', []
+
+            # -------- CHECK SINGLE VS TWO ROW --------
+            y_vals = np.array([c['top_y'] for c in characters])
+            h_vals = np.array([c['box'][3] - c['box'][1] for c in characters])
+
+            y_range = y_vals.max() - y_vals.min()
+            avg_h = np.mean(h_vals)
+
+            # -------- SINGLE ROW --------
+            if y_range < 0.8 * avg_h:
+                # Single row - just sort left to right
+                characters.sort(key=lambda c: c['x'])
+                plate_text = ''.join(c['char'] for c in characters)
+
+            # -------- TWO ROW (USE Y-THRESHOLD, NOT KMEANS) --------
             else:
-                # Extract y-centers of all characters
-                y_centers = np.array([c['y'] for c in characters]).reshape(-1, 1)
+                # Find the midpoint Y value
+                y_mid = (y_vals.min() + y_vals.max()) / 2
                 
-                # ---- ROW SEPARATION ----
-                y_vals = np.array([c['y'] for c in characters])
-                h_vals = np.array([c['box'][3] - c['box'][1] for c in characters])
-
-                y_range = y_vals.max() - y_vals.min()
-                avg_h = np.mean(h_vals)
-
-                if y_range < 1.2 * avg_h:
-                    # ---- SINGLE ROW ----
-                    characters.sort(key=lambda c: c['x'])
-                    plate_text = ''.join(c['char'] for c in characters)
-
-                else:
-                    # ---- TWO ROW (NEPALI PLATE) ----
-                    median_y = np.median(y_vals)
-
-                    top_row = [c for c in characters if c['y'] <= median_y]
-                    bottom_row = [c for c in characters if c['y'] > median_y]
-
-                    # safety: if split went wrong, fallback
-                    if len(top_row) == 0 or len(bottom_row) == 0:
-                        characters.sort(key=lambda c: (c['y'], c['x']))
-                        plate_text = ''.join(c['char'] for c in characters)
-                    else:
-                        top_row.sort(key=lambda c: c['x'])
-                        bottom_row.sort(key=lambda c: c['x'])
-
-                        plate_text = ''.join(c['char'] for c in top_row) + ''.join(c['char'] for c in bottom_row)
-
+                # Split into rows based on Y position
+                top_row = [c for c in characters if c['top_y'] < y_mid]
+                bottom_row = [c for c in characters if c['top_y'] >= y_mid]
                 
-                self.logger.info(f"OCR result: {plate_text}")
-                return plate_text, characters
-            
+                # Sort each row left to right
+                top_row.sort(key=lambda c: c['x'])
+                bottom_row.sort(key=lambda c: c['x'])
+                
+                # Concatenate without space: top row first, then bottom row
+                plate_text = ''.join(c['char'] for c in top_row) + ''.join(c['char'] for c in bottom_row)
+
+            self.logger.info(f"OCR result: {plate_text}")
+            return plate_text, characters
+
         except Exception as e:
             self.logger.error(f"Error performing OCR: {e}")
             return '', []
+
     
     # ============================================================
     # UTILITY METHODS

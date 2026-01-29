@@ -8,3 +8,4 @@
 output/
 *.log
 *.mp4
+/uploads
