@@ -96,7 +96,7 @@ class LicensePlateDetector:
             else:
                 self.logger.error(f"✘ Plate model not found: {plate_model_path}")
 
-            ocr_model_path = 'model/nepali_lp.pt'
+            ocr_model_path = 'model/new_nepali_char.pt'
             if os.path.exists(ocr_model_path):
                 self.ocr_model = YOLO(ocr_model_path)
                 self.logger.info("✔ Nepali OCR model loaded")
@@ -239,7 +239,7 @@ class LicensePlateDetector:
             tuple: ((x1, y1, x2, y2), confidence) or (None, 0.0)
         """
         try:
-            results = self.plate_detector(image, conf=0.3, verbose=False)
+            results = self.plate_detector(image, conf=0.13, verbose=False)
 
             if not results or results[0].boxes is None or len(results[0].boxes) == 0:
                 return None, 0.0
@@ -375,8 +375,7 @@ class LicensePlateDetector:
             return '', []
 
         try:
-            # Use low conf so all candidates come through — per-class filtering below
-            results = self.ocr_model(cropped_plate, conf=0.1, verbose=False)
+            results = self.ocr_model(cropped_plate, conf=0.35, verbose=False)
 
             if not results or results[0].boxes is None or len(results[0].boxes) == 0:
                 return '', []
@@ -385,35 +384,15 @@ class LicensePlateDetector:
             confidences = results[0].boxes.conf.cpu().numpy()
             classes     = results[0].boxes.cls.cpu().numpy()
 
-            # Class IDs that represent province/region words (wide banners)
-            PROVINCE_CLASS_IDS = {34, 35, 36, 37}
-            PROVINCE_CONF      = 0.1   # lower threshold — province labels are harder to detect
-            PROVINCE_MIN_RATIO = 2.2   # bbox must be at least 2.2x wider than tall
-            CHAR_CONF          = 0.25  # standard threshold for single characters
-
             # Build character list
             characters = []
             for box, conf, cls in zip(boxes, confidences, classes):
                 x1, y1, x2, y2 = box
-                cls_id  = int(cls)
-                label   = self.OCR_CLASS_NAMES.get(cls_id, f'?{cls_id}')
-                bw      = x2 - x1
-                bh      = y2 - y1
-                ratio   = bw / bh if bh > 0 else 0.0
-                conf_f  = float(conf)
-
-                if cls_id in PROVINCE_CLASS_IDS:
-                    # Accept only if bbox is wide enough AND meets lower conf threshold
-                    if ratio < PROVINCE_MIN_RATIO or conf_f < PROVINCE_CONF:
-                        continue
-                else:
-                    # Standard character — apply normal conf threshold
-                    if conf_f < CHAR_CONF:
-                        continue
-
+                cls_id = int(cls)
+                label  = self.OCR_CLASS_NAMES.get(cls_id, f'?{cls_id}')
                 characters.append({
                     'char':       label,
-                    'confidence': conf_f,
+                    'confidence': float(conf),
                     'x':          float((x1 + x2) / 2),
                     'top_y':      float(y1),
                     'box':        [float(x1), float(y1), float(x2), float(y2)],
