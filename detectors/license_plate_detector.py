@@ -75,7 +75,7 @@ class LicensePlateDetector:
 
         # Initialize models
         self.plate_detector = None
-        self.ocr_model = None
+        self.ocr_model      = None
 
         if CV_AVAILABLE:
             self._load_models()
@@ -368,14 +368,21 @@ class LicensePlateDetector:
         Run the Nepali OCR model on a cropped plate image,
         then sort the detected characters into reading order.
 
+        Province filtering:
+          - Wide bbox (width/height > 2.0) → only province classes (34-37) accepted
+          - Narrow bbox (width/height <= 2.0) → province classes discarded as noise
+
         Returns:
             tuple: (plate_text: str, characters: list[dict])
         """
         if self.ocr_model is None:
             return '', []
 
+        PROVINCE_CLASS_IDS = {34, 35, 36, 37}
+        WIDE_RATIO         = 2.0
+
         try:
-            results = self.ocr_model(cropped_plate, conf=0.35, verbose=False)
+            results = self.ocr_model(cropped_plate, conf=0.25, verbose=False)
 
             if not results or results[0].boxes is None or len(results[0].boxes) == 0:
                 return '', []
@@ -384,12 +391,53 @@ class LicensePlateDetector:
             confidences = results[0].boxes.conf.cpu().numpy()
             classes     = results[0].boxes.cls.cpu().numpy()
 
-            # Build character list
+            # ------------------------------------------------------------------
+            # DEBUG — saved to uploads/debug_ocr_boxes.jpg
+            # Add route to routes.py to view it:
+            #   @app.route('/debug_ocr')
+            #   def debug_ocr():
+            #       return send_from_directory(app.config['UPLOAD_FOLDER'], 'debug_ocr_boxes.jpg')
+            # ------------------------------------------------------------------
+            debug_img = cropped_plate.copy()
+            for box, conf, cls in zip(boxes, confidences, classes):
+                x1d, y1d, x2d, y2d = map(int, box)
+                cls_id_d = int(cls)
+                label_d  = self.OCR_CLASS_NAMES.get(cls_id_d, f'?{cls_id_d}')
+                bwd      = x2d - x1d
+                bhd      = y2d - y1d
+                ratio_d  = bwd / bhd if bhd > 0 else 0.0
+                is_wide_d = ratio_d > WIDE_RATIO
+                # Green = regular char, Red = province class
+                color = (0, 0, 255) if cls_id_d in PROVINCE_CLASS_IDS else (0, 255, 0)
+                cv2.rectangle(debug_img, (x1d, y1d), (x2d, y2d), color, 2)
+                text = f"{cls_id_d}:{label_d} r={ratio_d:.1f} {'WIDE' if is_wide_d else ''}"
+                ty   = y1d - 6 if y1d > 16 else y2d + 14
+                cv2.putText(debug_img, text, (x1d, ty),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1, cv2.LINE_AA)
+            debug_path = os.path.join(self.upload_folder, 'debug_ocr_boxes.jpg')
+            cv2.imwrite(debug_path, debug_img)
+            self.logger.info(f"[DEBUG] bbox image → {debug_path}")
+            # ------------------------------------------------------------------
+
             characters = []
             for box, conf, cls in zip(boxes, confidences, classes):
                 x1, y1, x2, y2 = box
-                cls_id = int(cls)
-                label  = self.OCR_CLASS_NAMES.get(cls_id, f'?{cls_id}')
+                cls_id  = int(cls)
+                bw      = x2 - x1
+                bh      = y2 - y1
+                ratio   = bw / bh if bh > 0 else 0.0
+                is_wide = ratio > WIDE_RATIO
+
+                if is_wide:
+                    # Wide bbox — only province classes make sense here
+                    if cls_id not in PROVINCE_CLASS_IDS:
+                        continue
+                else:
+                    # Narrow bbox — province classes are noise, discard them
+                    if cls_id in PROVINCE_CLASS_IDS:
+                        continue
+
+                label = self.OCR_CLASS_NAMES.get(cls_id, f'?{cls_id}')
                 characters.append({
                     'char':       label,
                     'confidence': float(conf),
@@ -405,7 +453,10 @@ class LicensePlateDetector:
             rows, sorted_flat = self._sort_characters(characters)
 
             plate_text = ''.join(c['char'] for c in sorted_flat)
-            self.logger.info(f"OCR result: '{plate_text}'  ({len(rows)} row(s), {len(characters)} char(s))")
+            self.logger.info(
+                f"OCR result: '{plate_text}'  "
+                f"({len(rows)} row(s), {len(characters)} char(s))"
+            )
             return plate_text, sorted_flat
 
         except Exception as e:

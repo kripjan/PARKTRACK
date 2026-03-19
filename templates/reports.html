@@ -362,11 +362,20 @@
 
     // Export Functions
     function exportReport(type) {
-        // In a real implementation, this would trigger a server-side export
-        alert(`Exporting ${type} report... (Feature to be implemented)`);
-        
-        // Example implementation for future use:
-        // window.location.href = `/api/export/${type}`;
+        const urls = {
+            daily:    '/export/daily?days=7',
+            revenue:  '/export/revenue?days=7',
+            vehicles: '/export/vehicles'
+        };
+        if (!urls[type]) return;
+
+        // Create a hidden anchor and click it to trigger browser download
+        const a = document.createElement('a');
+        a.href = urls[type];
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
     }
 </script>
 {% endblock %}
