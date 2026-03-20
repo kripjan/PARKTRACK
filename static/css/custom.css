@@ -291,3 +291,70 @@
     background: linear-gradient(135deg, rgba(13, 202, 240, 0.1), rgba(13, 202, 240, 0.05));
     border-left: 4px solid var(--bs-info);
 }
+
+[data-bs-theme="light"] .duration-counter,
+[data-bs-theme="light"] .cost-counter {
+    color: #0d6efd;
+}
+
+[data-bs-theme="light"] .activity-item:hover {
+    background-color: rgba(0, 0, 0, 0.04);
+}
+
+[data-bs-theme="light"] .table-hover tbody tr:hover {
+    background-color: rgba(0, 0, 0, 0.04);
+}
+
+[data-bs-theme="light"] #canvas-container {
+    background: #f8f9fa;
+}
+
+[data-bs-theme="light"] .navbar {
+    background-color: #ffffff !important;
+    border-bottom: 1px solid #dee2e6 !important;
+}
+
+[data-bs-theme="light"] .navbar .navbar-brand,
+[data-bs-theme="light"] .navbar .nav-link {
+    color: #212529 !important;
+}
+
+[data-bs-theme="light"] .navbar .nav-link:hover {
+    color: #0d6efd !important;
+}
+
+[data-bs-theme="light"] .navbar .nav-link.active {
+    color: #0d6efd !important;
+    font-weight: 500;
+}
+
+[data-bs-theme="light"] .navbar .navbar-toggler {
+    border-color: #adb5bd;
+}
+
+[data-bs-theme="light"] .navbar .navbar-toggler-icon {
+    filter: invert(1) brightness(0);
+}
+
+[data-bs-theme="light"] .card.bg-dark {
+    background-color: #f8f9fa !important;
+    border: 1px solid #dee2e6 !important;
+}
+
+[data-bs-theme="light"] .card.bg-dark .card-title,
+[data-bs-theme="light"] .card.bg-dark .text-white {
+    color: #212529 !important;
+}
+
+[data-bs-theme="light"] .card.bg-dark .text-white-50 {
+    color: #6c757d !important;
+}
+
+[data-bs-theme="light"] .card.bg-dark pre,
+[data-bs-theme="light"] .card.bg-dark code {
+    color: #495057 !important;
+}
+
+[data-bs-theme="light"] .card.bg-dark ol {
+    color: #495057 !important;
+}
