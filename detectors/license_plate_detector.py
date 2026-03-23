@@ -96,7 +96,7 @@ class LicensePlateDetector:
             else:
                 self.logger.error(f"✘ Plate model not found: {plate_model_path}")
 
-            ocr_model_path = 'model/new_nepali_char.pt'
+            ocr_model_path = 'model/new_nepali_char_det.pt'
             if os.path.exists(ocr_model_path):
                 self.ocr_model = YOLO(ocr_model_path)
                 self.logger.info("✔ Nepali OCR model loaded")
@@ -391,13 +391,6 @@ class LicensePlateDetector:
             confidences = results[0].boxes.conf.cpu().numpy()
             classes     = results[0].boxes.cls.cpu().numpy()
 
-            # ------------------------------------------------------------------
-            # DEBUG — saved to uploads/debug_ocr_boxes.jpg
-            # Add route to routes.py to view it:
-            #   @app.route('/debug_ocr')
-            #   def debug_ocr():
-            #       return send_from_directory(app.config['UPLOAD_FOLDER'], 'debug_ocr_boxes.jpg')
-            # ------------------------------------------------------------------
             debug_img = cropped_plate.copy()
             for box, conf, cls in zip(boxes, confidences, classes):
                 x1d, y1d, x2d, y2d = map(int, box)
