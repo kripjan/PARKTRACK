@@ -13,3 +13,6 @@ ultralytics
 
 # parking detection
 shapely>=2.0.0
+
+# OCR
+easyocr

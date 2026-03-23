@@ -17,10 +17,12 @@ document.addEventListener('DOMContentLoaded', function() {
     const processingModal = new bootstrap.Modal(document.getElementById('processing-modal'));
     const successModal = new bootstrap.Modal(document.getElementById('success-modal'));
     const imagePreviewModal = new bootstrap.Modal(document.getElementById('image-preview-modal'));
+    const embossedModal = new bootstrap.Modal(document.getElementById('embossed-modal'));
     
     let currentCroppedPlatePath = '';
     let currentDetectedText = '';
     let currentDetectionType = 'entry';
+    let isEmbossed = false;
     
     // Image preview
     imageInput.addEventListener('change', function(e) {
@@ -35,7 +37,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
-    // Form submission
+    // Form submission — show embossed question first
     uploadForm.addEventListener('submit', function(e) {
         e.preventDefault();
         
@@ -47,9 +49,30 @@ document.addEventListener('DOMContentLoaded', function() {
         
         currentDetectionType = detectionTypeSelect.value;
         
+        // Show embossed question modal before processing
+        embossedModal.show();
+    });
+    
+    // Embossed plate: YES
+    document.getElementById('embossed-yes-btn').addEventListener('click', function() {
+        isEmbossed = true;
+        embossedModal.hide();
+        submitImageForDetection();
+    });
+    
+    // Embossed plate: NO
+    document.getElementById('embossed-no-btn').addEventListener('click', function() {
+        isEmbossed = false;
+        embossedModal.hide();
+        submitImageForDetection();
+    });
+    
+    function submitImageForDetection() {
+        const file = imageInput.files[0];
         const formData = new FormData();
         formData.append('image', file);
         formData.append('detection_type', currentDetectionType);
+        formData.append('is_embossed', isEmbossed ? 'true' : 'false');
         
         uploadBtn.disabled = true;
         processingModal.show();
@@ -76,7 +99,7 @@ document.addEventListener('DOMContentLoaded', function() {
             console.error('Error:', error);
             showAlert('Error processing image', 'danger');
         });
-    });
+    }
     
     // Display results
     function displayResults(data) {

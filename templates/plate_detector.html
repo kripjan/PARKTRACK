@@ -125,12 +125,12 @@
                                     </span>
                                 </div>
                                 
-                                <h6 class="mb-3 text-black">Detected License Plate Number:</h6>
+                                <h6 class="mb-3">Detected License Plate Number:</h6>
                                 <div class="alert alert-success mb-3">
                                     <h4 class="mb-0 font-monospace" id="detected-plate-text">-</h4>
                                 </div>
                                 
-                                <h6 class="mb-2 text-black">Actual Plate no.</h6>
+                                <h6 class="mb-2">Actual Plate no.</h6>
                                 <div class="input-group mb-3">
                                     <span class="input-group-text">
                                         <i class="bi bi-pencil"></i>
@@ -233,6 +233,38 @@
                             {% endif %}
                         </tbody>
                     </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Embossed Plate Question Modal -->
+<div class="modal fade" id="embossed-modal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="bi bi-question-circle me-2 text-warning"></i>
+                    Plate Type
+                </h5>
+            </div>
+            <div class="modal-body text-center py-4">
+                <div class="mb-3">
+                    <i class="bi bi-credit-card-2-front" style="font-size: 3rem; color: var(--bs-warning);"></i>
+                </div>
+                <h5 class="mb-2">Is this an embossed plate?</h5>
+                <p class="text-muted mb-4">
+                    Embossed plates have raised English characters.<br>
+                    Non-embossed plates use Nepali/Devanagari script.
+                </p>
+                <div class="d-flex gap-3 justify-content-center">
+                    <button class="btn btn-warning btn-lg px-5" id="embossed-yes-btn">
+                        <i class="bi bi-check-lg me-2"></i>Yes, Embossed
+                    </button>
+                    <button class="btn btn-outline-secondary btn-lg px-5" id="embossed-no-btn">
+                        <i class="bi bi-x-lg me-2"></i>No, Nepali
+                    </button>
                 </div>
             </div>
         </div>
