@@ -32,9 +32,13 @@ class LicensePlateDetector:
         self.logger = logging.getLogger(__name__)
         self.upload_folder = upload_folder
         self.plates_folder = os.path.join(upload_folder, 'detected_plates')
+        self.embossed_folder = os.path.join(self.plates_folder, 'embossed')
+        self.nepali_folder = os.path.join(self.plates_folder, 'nepali')
         
         # Ensure folders exist
         os.makedirs(self.plates_folder, exist_ok=True)
+        os.makedirs(self.embossed_folder, exist_ok=True)
+        os.makedirs(self.nepali_folder, exist_ok=True)
         
         # Initialize models
         self.plate_detector = None
@@ -198,7 +202,7 @@ class LicensePlateDetector:
         # Step 3: Save cropped plate (if requested)
         cropped_path = None
         if save_cropped:
-            cropped_path = self._save_cropped_plate(cropped_plate)
+            cropped_path = self._save_cropped_plate(cropped_plate, is_embossed=is_embossed)
             result['cropped_plate_path'] = cropped_path
         
         # Step 4: Perform OCR — branch based on plate type
@@ -280,20 +284,28 @@ class LicensePlateDetector:
             self.logger.error(f"Error cropping plate: {e}")
             return None
     
-    def _save_cropped_plate(self, cropped_plate):
+    def _save_cropped_plate(self, cropped_plate, is_embossed=False):
         """
-        Save cropped plate to disk
+        Save cropped plate to the appropriate subfolder based on plate type.
+        
+        Folder structure:
+          detected_plates/
+            embossed/   ← English raised character plates
+            nepali/     ← Nepali/Devanagari script plates
         
         Returns:
             str: Path to saved file
         """
         try:
+            target_folder = self.embossed_folder if is_embossed else self.nepali_folder
+            plate_type = 'embossed' if is_embossed else 'nepali'
+            
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
-            filename = f'plate_{timestamp}.jpg'
-            filepath = os.path.join(self.plates_folder, filename)
+            filename = f'{plate_type}_{timestamp}.jpg'
+            filepath = os.path.join(target_folder, filename)
             
             cv2.imwrite(filepath, cropped_plate)
-            self.logger.info(f"Saved cropped plate: {filename}")
+            self.logger.info(f"Saved cropped plate [{plate_type}]: {filename}")
             
             return filepath
             

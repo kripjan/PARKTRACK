@@ -278,6 +278,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     // View plate image in modal
+    // frame_path is stored as relative path from detected_plates/ e.g. "embossed/filename.jpg"
     window.viewPlateImage = function(framePath) {
         const modalImage = document.getElementById('modal-plate-image');
         modalImage.src = `/uploads/detected_plates/${framePath}`;
