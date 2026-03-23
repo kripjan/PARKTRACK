@@ -238,6 +238,7 @@ def upload_plate_image():
         
         file = request.files['image']
         detection_type = request.form.get('detection_type', 'entry')
+        is_embossed = request.form.get('is_embossed', 'false').lower() == 'true'
         
         if file.filename == '':
             return jsonify({'success': False, 'message': 'No file selected'}), 400
@@ -256,7 +257,7 @@ def upload_plate_image():
         file.save(filepath)
         
         # Process image
-        result = license_plate_detector.detect_from_image(filepath, save_cropped=True)
+        result = license_plate_detector.detect_from_image(filepath, save_cropped=True, is_embossed=is_embossed)
         
         if not result['success']:
             return jsonify({
@@ -277,11 +278,17 @@ def upload_plate_image():
         
         # Add cropped plate URL if available
         if result.get('cropped_plate_path'):
-            cropped_filename = os.path.basename(result['cropped_plate_path'])
-            response_data['cropped_plate'] = url_for('serve_upload', 
-                filename=f"detected_plates/{cropped_filename}")
+            # cropped_plate_path is an absolute path like:
+            #   /abs/path/uploads/detected_plates/embossed/nepali_20260323.jpg
+            # We need the part after the uploads folder as the URL filename
+            cropped_abs = os.path.abspath(result['cropped_plate_path'])
+            upload_abs = os.path.abspath(app.config['UPLOAD_FOLDER'])
+            # Get relative path from uploads root, use forward slashes for URL
+            rel_path = os.path.relpath(cropped_abs, upload_abs).replace('\\', '/')
+            response_data['cropped_plate'] = f"/uploads/{rel_path}"
+            app.logger.info(f"Cropped plate URL: /uploads/{rel_path}")
         else:
-            response_data['cropped_plate'] = None  # âœ… Explicit None
+            response_data['cropped_plate'] = None
         
         return jsonify(response_data)
         
@@ -304,22 +311,34 @@ def save_corrected_plate():
         if not corrected_text:
             return jsonify({'success': False, 'message': 'No plate text provided'}), 400
         
-        # Convert URL path back to file path
+        # Convert URL path back to absolute file path
         if cropped_plate_path.startswith('/uploads/'):
-            cropped_plate_path = os.path.join(
-                app.config['UPLOAD_FOLDER'], 
-                cropped_plate_path.replace('/uploads/', '')
-            )
-        
+            rel = cropped_plate_path.replace('/uploads/', '', 1)
+            cropped_plate_path = os.path.join(app.config['UPLOAD_FOLDER'], rel)
+
         # Convert detection_type to vehicle_count: 1 for entry, 2 for exit
         type_code = 1 if detection_type == 'entry' else 2
-        
-        # Save detection log with detection_type stored in vehicle_count field
+
+        # Store path relative to detected_plates/ dir to preserve subfolder
+        # e.g. "embossed/nepali_20260323.jpg"
+        if cropped_plate_path:
+            detected_plates_dir = os.path.abspath(
+                os.path.join(app.config['UPLOAD_FOLDER'], 'detected_plates')
+            )
+            try:
+                stored_path = os.path.relpath(
+                    os.path.abspath(cropped_plate_path), detected_plates_dir
+                ).replace('\\', '/')
+            except ValueError:
+                stored_path = os.path.basename(cropped_plate_path)
+        else:
+            stored_path = None
+
         detection = DetectionLog(
             detection_type='license_plate',
             license_plate=corrected_text,
             confidence=1.0 if corrected_text != detected_text else 0.8,
-            frame_path=os.path.basename(cropped_plate_path) if cropped_plate_path else None,
+            frame_path=stored_path,
             vehicle_count=type_code,  # Store entry(1)/exit(2) type here
             timestamp=datetime.now()
         )
@@ -427,148 +446,6 @@ def api_revenue_summary():
     days = request.args.get('days', 7, type=int)
     summary = report_service.get_revenue_summary(days)
     return jsonify(summary)
-
-
-# ============================================================================
-# CSV EXPORT ROUTES
-# ============================================================================
-
-@app.route('/export/daily')
-def export_daily():
-    """Export daily parking sessions as CSV"""
-    import csv
-    import io
-    from models import ParkingSession, Vehicle
-
-    days = request.args.get('days', 7, type=int)
-
-    try:
-        from datetime import datetime, timedelta
-        end_date   = datetime.now()
-        start_date = end_date - timedelta(days=days)
-
-        sessions = db.session.query(ParkingSession).join(Vehicle).filter(
-            ParkingSession.entry_time >= start_date,
-            ParkingSession.is_active == False
-        ).order_by(ParkingSession.entry_time.desc()).all()
-
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow([
-            'Session ID', 'License Plate', 'Parking Space',
-            'Entry Time', 'Exit Time', 'Duration (min)', 'Toll (NPR)'
-        ])
-        for s in sessions:
-            writer.writerow([
-                s.id,
-                s.vehicle.license_plate,
-                s.parking_space.name if s.parking_space else 'Unassigned',
-                s.entry_time.strftime('%Y-%m-%d %H:%M:%S') if s.entry_time else '',
-                s.exit_time.strftime('%Y-%m-%d %H:%M:%S') if s.exit_time else '',
-                s.duration_minutes or 0,
-                f"{s.toll_amount:.2f}"
-            ])
-
-        output.seek(0)
-        filename = f"daily_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-        from flask import Response
-        return Response(
-            output.getvalue(),
-            mimetype='text/csv',
-            headers={'Content-Disposition': f'attachment; filename={filename}'}
-        )
-
-    except Exception as e:
-        app.logger.error(f"Error exporting daily report: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/export/revenue')
-def export_revenue():
-    """Export daily revenue summary as CSV"""
-    import csv
-    import io
-
-    days = request.args.get('days', 7, type=int)
-
-    try:
-        from datetime import datetime
-        daily_revenue = report_service.get_daily_revenue(days=days)
-
-        total = sum(r['revenue'] for r in daily_revenue)
-        avg   = total / len(daily_revenue) if daily_revenue else 0
-
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(['Date', 'Revenue (NPR)'])
-        for row in daily_revenue:
-            writer.writerow([
-                row['date'].strftime('%Y-%m-%d'),
-                f"{row['revenue']:.2f}"
-            ])
-        writer.writerow([])
-        writer.writerow(['Total', f"{total:.2f}"])
-        writer.writerow(['Daily Average', f"{avg:.2f}"])
-
-        output.seek(0)
-        filename = f"revenue_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-        from flask import Response
-        return Response(
-            output.getvalue(),
-            mimetype='text/csv',
-            headers={'Content-Disposition': f'attachment; filename={filename}'}
-        )
-
-    except Exception as e:
-        app.logger.error(f"Error exporting revenue report: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/export/vehicles')
-def export_vehicles():
-    """Export top vehicles report as CSV"""
-    import csv
-    import io
-
-    try:
-        from datetime import datetime
-        vehicles = report_service.get_top_vehicles(limit=100)
-
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow([
-            'Rank', 'License Plate', 'Total Visits',
-            'Total Paid (NPR)', 'Avg per Visit (NPR)', 'Customer Type'
-        ])
-        for i, v in enumerate(vehicles, start=1):
-            avg  = v['total_paid'] / v['total_visits'] if v['total_visits'] else 0
-            if v['total_visits'] >= 20:
-                tier = 'Premium'
-            elif v['total_visits'] >= 10:
-                tier = 'Regular'
-            else:
-                tier = 'Occasional'
-            writer.writerow([
-                i,
-                v['license_plate'],
-                v['total_visits'],
-                f"{v['total_paid']:.2f}",
-                f"{avg:.2f}",
-                tier
-            ])
-
-        output.seek(0)
-        filename = f"vehicle_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-        from flask import Response
-        return Response(
-            output.getvalue(),
-            mimetype='text/csv',
-            headers={'Content-Disposition': f'attachment; filename={filename}'}
-        )
-
-    except Exception as e:
-        app.logger.error(f"Error exporting vehicle report: {e}")
-        return jsonify({'error': str(e)}), 500
 
 
 # ============================================================================
