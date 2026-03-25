@@ -7,6 +7,7 @@ import os
 import cv2
 import numpy as np
 from datetime import datetime
+from sklearn.cluster import KMeans
 
 try:
     from ultralytics import YOLO
@@ -26,6 +27,7 @@ class LicensePlateDetector:
     Unified license plate detector with Nepali OCR support
     Works with both uploaded images and video frame ROIs
     """
+<<<<<<< HEAD
       # Hardcoded class-index → label mapping for the Nepali OCR model.
     # This overrides whatever names are embedded in the .pt file, which
     # may be stale or incorrect (e.g. 'class_14' instead of 'BAA').
@@ -70,6 +72,9 @@ class LicensePlateDetector:
         37: 'karnali',
     }
 
+=======
+    
+>>>>>>> 23f361fe4464f65b4bda1c6ad4a78a80d1965589
     def __init__(self, upload_folder='uploads'):
         self.logger = logging.getLogger(__name__)
         self.upload_folder = upload_folder
@@ -104,7 +109,11 @@ class LicensePlateDetector:
                 self.logger.error(f"âœ— Plate model not found: {plate_model_path}")
             
             # Nepali OCR model
+<<<<<<< HEAD
             ocr_model_path = 'model/nep_char_det_v1.pt'
+=======
+            ocr_model_path = 'model/nepali_lp.pt'
+>>>>>>> 23f361fe4464f65b4bda1c6ad4a78a80d1965589
             if os.path.exists(ocr_model_path):
                 self.ocr_model = YOLO(ocr_model_path)
                 self.logger.info("âœ“ Nepali OCR model loaded")
@@ -194,6 +203,7 @@ class LicensePlateDetector:
     
     def _process(self, image, save_cropped=True, is_embossed=False):
         """
+<<<<<<< HEAD
                 Shared processing pipeline:
           1. Detect plate bounding box
           2. Crop plate region
@@ -206,32 +216,60 @@ class LicensePlateDetector:
             image (numpy.ndarray): Input image (full frame or vehicle ROI).
             save_cropped (bool): Whether to save the cropped plate.
 
+=======
+        Core processing pipeline (used by both entry points)
+        
+        Steps:
+        1. Detect plate bounding box
+        2. Crop plate region
+        3. Perform OCR on cropped plate (EasyOCR for embossed, Nepali model otherwise)
+        4. Return results
+        
+        Args:
+            image (numpy.ndarray): Input image
+            save_cropped (bool): Whether to save cropped plate
+            is_embossed (bool): Use EasyOCR for English embossed plates
+            
+>>>>>>> 23f361fe4464f65b4bda1c6ad4a78a80d1965589
         Returns:
-            dict: Detection result (same schema as detect_from_image).
+            dict: Detection results
         """
         result = {
-            'success':            False,
-            'plate_text':         '',
-            'confidence':         0.0,
+            'success': False,
+            'plate_text': '',
+            'confidence': 0.0,
             'cropped_plate_path': None,
-            'bbox':               None,
-            'characters':         [],
-            'timestamp':          datetime.now().isoformat(),
-            'message':            '',
+            'bbox': None,
+            'characters': [],
+            'timestamp': datetime.now().isoformat(),
+            'message': '',
+            'ocr_engine': 'easyocr' if is_embossed else 'nepali'
         }
+<<<<<<< HEAD
+=======
+        
+>>>>>>> 23f361fe4464f65b4bda1c6ad4a78a80d1965589
         # Check if models are loaded
         if not CV_AVAILABLE or self.plate_detector is None:
             result['message'] = "Plate detection model not available"
             return result
         
+<<<<<<< HEAD
         # Step 1: locate plate
+=======
+        # Step 1: Detect plate location
+>>>>>>> 23f361fe4464f65b4bda1c6ad4a78a80d1965589
         plate_bbox, plate_confidence = self._detect_plate_bbox(image)
         
         if plate_bbox is None:
             result['message'] = "No license plate detected in image"
             return result
         
+<<<<<<< HEAD
         # Step 2: Crop 
+=======
+        # Step 2: Crop plate region
+>>>>>>> 23f361fe4464f65b4bda1c6ad4a78a80d1965589
         cropped_plate = self._crop_plate(image, plate_bbox)
         
         if cropped_plate is None:
@@ -239,8 +277,15 @@ class LicensePlateDetector:
             return result
         
         # Step 3: Save cropped plate (if requested)
+<<<<<<< HEAD
         if save_cropped:
             result['cropped_plate_path'] = self._save_cropped_plate(cropped_plate, is_embossed=is_embossed)
+=======
+        cropped_path = None
+        if save_cropped:
+            cropped_path = self._save_cropped_plate(cropped_plate, is_embossed=is_embossed)
+            result['cropped_plate_path'] = cropped_path
+>>>>>>> 23f361fe4464f65b4bda1c6ad4a78a80d1965589
         
         # Step 4: Perform OCR — branch based on plate type
         if is_embossed:
@@ -274,18 +319,30 @@ class LicensePlateDetector:
         try:
             results = self.plate_detector(image, conf=0.3, verbose=False)
             
+<<<<<<< HEAD
             if not results or results[0].boxes is None or len(results[0].boxes) == 0:               
+=======
+            if len(results) == 0 or results[0].boxes is None or len(results[0].boxes) == 0:
+>>>>>>> 23f361fe4464f65b4bda1c6ad4a78a80d1965589
                 return None, 0.0
             
             # Get highest confidence detection
             boxes = results[0].boxes.xyxy.cpu().numpy()
             confidences = results[0].boxes.conf.cpu().numpy()
             
+<<<<<<< HEAD
             best_idx   = int(np.argmax(confidences))
             bbox       = tuple(map(int, boxes[best_idx]))
             confidence = float(confidences[best_idx])
             
             return bbox, confidence
+=======
+            best_idx = np.argmax(confidences)
+            bbox = boxes[best_idx]
+            confidence = float(confidences[best_idx])
+            
+            return tuple(map(int, bbox)), confidence
+>>>>>>> 23f361fe4464f65b4bda1c6ad4a78a80d1965589
             
         except Exception as e:
             self.logger.error(f"Error detecting plate bbox: {e}")
@@ -350,6 +407,7 @@ class LicensePlateDetector:
             self.logger.error(f"Error saving cropped plate: {e}")
             return None
     
+<<<<<<< HEAD
     #===================================================
     # CHARACTER SORTING
     # ============================================================
@@ -409,6 +467,8 @@ class LicensePlateDetector:
     # ============================================================
     # OCR
     # ============================================================
+=======
+>>>>>>> 23f361fe4464f65b4bda1c6ad4a78a80d1965589
     def _perform_ocr(self, cropped_plate):
         """
         Perform OCR on cropped plate using Nepali model
@@ -422,7 +482,7 @@ class LicensePlateDetector:
         try:
             results = self.ocr_model(cropped_plate, conf=0.25, verbose=False)
 
-            if not results or results[0].boxes is None or len(results[0].boxes) == 0:
+            if len(results) == 0 or results[0].boxes is None or len(results[0].boxes) == 0:
                 return '', []
 
             # -------- EXTRACT DETECTIONS --------
@@ -430,15 +490,19 @@ class LicensePlateDetector:
             confidences = results[0].boxes.conf.cpu().numpy()
             classes = results[0].boxes.cls.cpu().numpy()
             class_names = results[0].names
+<<<<<<< HEAD
 
             PROVINCE_CLASS_IDS = {34, 35, 36, 37}  # Class IDs that represent province/region words (wide banners)
             PROVINCE_CONF      = 0.1   # lower threshold — province labels are harder to detect
             PROVINCE_MIN_RATIO = 2.2   # bbox must be at least 2.2x wider than tall
             CHAR_CONF          = 0.25  # standard threshold for single characters
+=======
+>>>>>>> 23f361fe4464f65b4bda1c6ad4a78a80d1965589
 
             characters = []
             for box, conf, cls in zip(boxes, confidences, classes):
                 x1, y1, x2, y2 = box
+<<<<<<< HEAD
                 cls_id  = int(cls)
                 label   = self.OCR_CLASS_NAMES.get(cls_id, f'?{cls_id}')
                 bw      = x2 - x1
@@ -462,18 +526,61 @@ class LicensePlateDetector:
                     'top_y':      float(y1),
                     'box':        [float(x1), float(y1), float(x2), float(y2)],
 
+=======
+                center_x = (x1 + x2) / 2
+                center_y = (y1 + y2) / 2
+
+                characters.append({
+                    'char': class_names[int(cls)],
+                    'confidence': float(conf),
+                    'x': float(center_x),
+                    'y': float(center_y),
+                    'top_y': float(y1),   # IMPORTANT FOR ROW CLUSTERING
+                    'box': [float(x1), float(y1), float(x2), float(y2)]
+>>>>>>> 23f361fe4464f65b4bda1c6ad4a78a80d1965589
                 })
 
-            if not characters:
+            if len(characters) == 0:
                 return '', []
 
-            # Sort into rows using median-gap thresholding
-            rows, sorted_flat = self._sort_characters(characters)
+            # -------- CHECK SINGLE VS TWO ROW --------
+            y_vals = np.array([c['top_y'] for c in characters])
+            h_vals = np.array([c['box'][3] - c['box'][1] for c in characters])
 
+<<<<<<< HEAD
 
             plate_text = ''.join(c['char'] for c in sorted_flat)
             self.logger.info(f"OCR result: '{plate_text}'  ({len(rows)} row(s), {len(characters)} char(s))")
             return plate_text, sorted_flat
+=======
+            y_range = y_vals.max() - y_vals.min()
+            avg_h = np.mean(h_vals)
+
+            # -------- SINGLE ROW --------
+            if y_range < 0.8 * avg_h:
+                # Single row - just sort left to right
+                characters.sort(key=lambda c: c['x'])
+                plate_text = ''.join(c['char'] for c in characters)
+
+            # -------- TWO ROW (USE Y-THRESHOLD, NOT KMEANS) --------
+            else:
+                # Find the midpoint Y value
+                y_mid = (y_vals.min() + y_vals.max()) / 2
+                
+                # Split into rows based on Y position
+                top_row = [c for c in characters if c['top_y'] < y_mid]
+                bottom_row = [c for c in characters if c['top_y'] >= y_mid]
+                
+                # Sort each row left to right
+                top_row.sort(key=lambda c: c['x'])
+                bottom_row.sort(key=lambda c: c['x'])
+                
+                # Concatenate without space: top row first, then bottom row
+                plate_text = ''.join(c['char'] for c in top_row) + ''.join(c['char'] for c in bottom_row)
+
+            self.logger.info(f"OCR result: {plate_text}")
+            return plate_text, characters
+>>>>>>> 23f361fe4464f65b4bda1c6ad4a78a80d1965589
 
         except Exception as e:
             self.logger.error(f"Error performing OCR: {e}")
@@ -506,10 +613,15 @@ class LicensePlateDetector:
             if not results:
                 return '', []
 
+<<<<<<< HEAD
             results.sort(key=lambda r: (
             (r[0][0][1] + r[0][2][1]) / 2,  # center_y (row)
             (r[0][0][0] + r[0][2][0]) / 2   # center_x (column)
             ))
+=======
+            # Sort detections left-to-right (by x center of bounding box)
+            results.sort(key=lambda r: (r[0][0][0] + r[0][2][0]) / 2)
+>>>>>>> 23f361fe4464f65b4bda1c6ad4a78a80d1965589
 
             characters = []
             texts = []
