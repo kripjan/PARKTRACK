@@ -238,6 +238,7 @@ def upload_plate_image():
         
         file = request.files['image']
         detection_type = request.form.get('detection_type', 'entry')
+        is_embossed = request.form.get('is_embossed', 'false').lower() == 'true'
         
         if file.filename == '':
             return jsonify({'success': False, 'message': 'No file selected'}), 400
@@ -256,8 +257,7 @@ def upload_plate_image():
         file.save(filepath)
         
         # Process image
-        result = license_plate_detector.detect_from_image(filepath, save_cropped=True)
-        
+        result = license_plate_detector.detect_from_image(filepath, save_cropped=True, is_embossed=is_embossed)        
         if not result['success']:
             return jsonify({
                 'success': False,
@@ -277,11 +277,17 @@ def upload_plate_image():
         
         # Add cropped plate URL if available
         if result.get('cropped_plate_path'):
-            cropped_filename = os.path.basename(result['cropped_plate_path'])
-            response_data['cropped_plate'] = url_for('serve_upload', 
-                filename=f"detected_plates/{cropped_filename}")
+            # cropped_plate_path is an absolute path like:
+            #   /abs/path/uploads/detected_plates/embossed/nepali_20260323.jpg
+            # We need the part after the uploads folder as the URL filename
+            cropped_abs = os.path.abspath(result['cropped_plate_path'])
+            upload_abs = os.path.abspath(app.config['UPLOAD_FOLDER'])
+            # Get relative path from uploads root, use forward slashes for URL
+            rel_path = os.path.relpath(cropped_abs, upload_abs).replace('\\', '/')
+            response_data['cropped_plate'] = f"/uploads/{rel_path}"
+            app.logger.info(f"Cropped plate URL: /uploads/{rel_path}")
         else:
-            response_data['cropped_plate'] = None  # âœ… Explicit None
+            response_data['cropped_plate'] = None
         
         return jsonify(response_data)
         
@@ -304,22 +310,34 @@ def save_corrected_plate():
         if not corrected_text:
             return jsonify({'success': False, 'message': 'No plate text provided'}), 400
         
-        # Convert URL path back to file path
+        # Convert URL path back to absolute file path
         if cropped_plate_path.startswith('/uploads/'):
-            cropped_plate_path = os.path.join(
-                app.config['UPLOAD_FOLDER'], 
-                cropped_plate_path.replace('/uploads/', '')
-            )
-        
+            rel = cropped_plate_path.replace('/uploads/', '', 1)
+            cropped_plate_path = os.path.join(app.config['UPLOAD_FOLDER'], rel)
+
         # Convert detection_type to vehicle_count: 1 for entry, 2 for exit
         type_code = 1 if detection_type == 'entry' else 2
-        
-        # Save detection log with detection_type stored in vehicle_count field
+
+        # Store path relative to detected_plates/ dir to preserve subfolder
+        # e.g. "embossed/nepali_20260323.jpg"
+        if cropped_plate_path:
+            detected_plates_dir = os.path.abspath(
+                os.path.join(app.config['UPLOAD_FOLDER'], 'detected_plates')
+            )
+            try:
+                stored_path = os.path.relpath(
+                    os.path.abspath(cropped_plate_path), detected_plates_dir
+                ).replace('\\', '/')
+            except ValueError:
+                stored_path = os.path.basename(cropped_plate_path)
+        else:
+            stored_path = None
+
         detection = DetectionLog(
             detection_type='license_plate',
             license_plate=corrected_text,
             confidence=1.0 if corrected_text != detected_text else 0.8,
-            frame_path=os.path.basename(cropped_plate_path) if cropped_plate_path else None,
+            frame_path=stored_path,
             vehicle_count=type_code,  # Store entry(1)/exit(2) type here
             timestamp=datetime.now()
         )
@@ -428,8 +446,7 @@ def api_revenue_summary():
     summary = report_service.get_revenue_summary(days)
     return jsonify(summary)
 
-
-# ============================================================================
+#============================================================================
 # CSV EXPORT ROUTES
 # ============================================================================
 
@@ -569,7 +586,6 @@ def export_vehicles():
     except Exception as e:
         app.logger.error(f"Error exporting vehicle report: {e}")
         return jsonify({'error': str(e)}), 500
-
 
 # ============================================================================
 # WEBSOCKET EVENTS
