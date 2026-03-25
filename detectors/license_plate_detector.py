@@ -7,7 +7,6 @@ import os
 import cv2
 import numpy as np
 from datetime import datetime
-from sklearn.cluster import KMeans
 
 try:
     from ultralytics import YOLO
@@ -27,7 +26,50 @@ class LicensePlateDetector:
     Unified license plate detector with Nepali OCR support
     Works with both uploaded images and video frame ROIs
     """
-    
+      # Hardcoded class-index → label mapping for the Nepali OCR model.
+    # This overrides whatever names are embedded in the .pt file, which
+    # may be stale or incorrect (e.g. 'class_14' instead of 'BAA').
+    OCR_CLASS_NAMES = {
+        0:  'KA',
+        1:  'KO',
+        2:  'KHA',
+        3:  'GA',
+        4:  'CHA',
+        5:  'JA',
+        6:  'JHA',
+        7:  'YNA',
+        8:  'DI',
+        9:  'TA',
+        10: 'NA',
+        11: 'PA',
+        12: 'PRA',
+        13: 'BA',
+        14: 'BAA',
+        15: 'BHE',
+        16: 'MA',
+        17: 'ME',
+        18: 'YA',
+        19: 'LU',
+        20: 'C',
+        21: 'SU',
+        22: 'SE',
+        23: 'HA',
+        24: '0',
+        25: '1',
+        26: '2',
+        27: '3',
+        28: '4',
+        29: '5',
+        30: '6',
+        31: '7',
+        32: '8',
+        33: '9',
+        34: 'pradesh',
+        35: 'bagmati',
+        36: 'madhesh',
+        37: 'karnali',
+    }
+
     def __init__(self, upload_folder='uploads'):
         self.logger = logging.getLogger(__name__)
         self.upload_folder = upload_folder
@@ -62,7 +104,7 @@ class LicensePlateDetector:
                 self.logger.error(f"âœ— Plate model not found: {plate_model_path}")
             
             # Nepali OCR model
-            ocr_model_path = 'model/nepali_lp.pt'
+            ocr_model_path = "model\\nepali_char_det_v3.pt"
             if os.path.exists(ocr_model_path):
                 self.ocr_model = YOLO(ocr_model_path)
                 self.logger.info("âœ“ Nepali OCR model loaded")
@@ -152,47 +194,44 @@ class LicensePlateDetector:
     
     def _process(self, image, save_cropped=True, is_embossed=False):
         """
-        Core processing pipeline (used by both entry points)
+                Shared processing pipeline:
+          1. Detect plate bounding box
+          2. Crop plate region
+          3. Optionally save cropped plate
+          4. Run OCR
+          5. Return structured result
+
         
-        Steps:
-        1. Detect plate bounding box
-        2. Crop plate region
-        3. Perform OCR on cropped plate (EasyOCR for embossed, Nepali model otherwise)
-        4. Return results
-        
-        Args:
-            image (numpy.ndarray): Input image
-            save_cropped (bool): Whether to save cropped plate
-            is_embossed (bool): Use EasyOCR for English embossed plates
-            
+                Args:
+            image (numpy.ndarray): Input image (full frame or vehicle ROI).
+            save_cropped (bool): Whether to save the cropped plate.
+
         Returns:
-            dict: Detection results
+            dict: Detection result (same schema as detect_from_image).
         """
         result = {
-            'success': False,
-            'plate_text': '',
-            'confidence': 0.0,
+            'success':            False,
+            'plate_text':         '',
+            'confidence':         0.0,
             'cropped_plate_path': None,
-            'bbox': None,
-            'characters': [],
-            'timestamp': datetime.now().isoformat(),
-            'message': '',
-            'ocr_engine': 'easyocr' if is_embossed else 'nepali'
+            'bbox':               None,
+            'characters':         [],
+            'timestamp':          datetime.now().isoformat(),
+            'message':            '',
         }
-        
         # Check if models are loaded
         if not CV_AVAILABLE or self.plate_detector is None:
             result['message'] = "Plate detection model not available"
             return result
         
-        # Step 1: Detect plate location
+        # Step 1: locate plate
         plate_bbox, plate_confidence = self._detect_plate_bbox(image)
         
         if plate_bbox is None:
             result['message'] = "No license plate detected in image"
             return result
         
-        # Step 2: Crop plate region
+        # Step 2: Crop 
         cropped_plate = self._crop_plate(image, plate_bbox)
         
         if cropped_plate is None:
@@ -200,15 +239,14 @@ class LicensePlateDetector:
             return result
         
         # Step 3: Save cropped plate (if requested)
-        cropped_path = None
         if save_cropped:
-            cropped_path = self._save_cropped_plate(cropped_plate, is_embossed=is_embossed)
-            result['cropped_plate_path'] = cropped_path
+            result['cropped_plate_path'] = self._save_cropped_plate(cropped_plate, is_embossed=is_embossed)
         
         # Step 4: Perform OCR — branch based on plate type
         if is_embossed:
             plate_text, characters = self._perform_easyocr(cropped_plate)
         else:
+            # This is the path that was working before!
             plate_text, characters = self._perform_ocr(cropped_plate)
         
         # Step 5: Build result
@@ -237,18 +275,18 @@ class LicensePlateDetector:
         try:
             results = self.plate_detector(image, conf=0.3, verbose=False)
             
-            if len(results) == 0 or results[0].boxes is None or len(results[0].boxes) == 0:
+            if not results or results[0].boxes is None or len(results[0].boxes) == 0:               
                 return None, 0.0
             
             # Get highest confidence detection
             boxes = results[0].boxes.xyxy.cpu().numpy()
             confidences = results[0].boxes.conf.cpu().numpy()
             
-            best_idx = np.argmax(confidences)
-            bbox = boxes[best_idx]
+            best_idx   = int(np.argmax(confidences))
+            bbox       = tuple(map(int, boxes[best_idx]))
             confidence = float(confidences[best_idx])
             
-            return tuple(map(int, bbox)), confidence
+            return bbox, confidence
             
         except Exception as e:
             self.logger.error(f"Error detecting plate bbox: {e}")
@@ -313,137 +351,159 @@ class LicensePlateDetector:
             self.logger.error(f"Error saving cropped plate: {e}")
             return None
     
-    def _perform_ocr(self, cropped_plate):
+    #===================================================
+    # CHARACTER SORTING
+    # ============================================================
+
+    @staticmethod
+    def _sort_characters(characters):
         """
-        Perform OCR on cropped plate using Nepali model
+        Sort detected characters into rows using median-gap thresholding.
+        Works correctly for 1, 2, or any number of rows.
+
+        Algorithm:
+          1. Sort all characters top-to-bottom by top_y.
+          2. Compute consecutive gaps between top_y values.
+          3. A new row starts wherever a gap exceeds max(median_gap * 2, 5px).
+          4. Within each row, sort left-to-right by centre x.
+
+        Args:
+            characters (list[dict]): Each dict must have 'top_y' and 'x' keys.
 
         Returns:
-            tuple: (plate_text, character_details)
+            tuple:
+                rows        — list[list[dict]], one sub-list per row, left-to-right order.
+                sorted_flat — flat list of all chars in reading order (top→bottom, left→right).
+        """
+        if not characters:
+            return [], []
+
+        if len(characters) == 1:
+            return [[characters[0]]], [characters[0]]
+
+        # Sort top-to-bottom
+        characters.sort(key=lambda c: c['top_y'])
+
+        top_ys        = [c['top_y'] for c in characters]
+        gaps          = [top_ys[i + 1] - top_ys[i] for i in range(len(top_ys) - 1)]
+        median_gap    = float(np.median(gaps))
+        gap_threshold = max(median_gap * 2.0, 5.0)
+
+        rows        = []
+        current_row = [characters[0]]
+
+        for i, char in enumerate(characters[1:]):
+            if gaps[i] > gap_threshold:
+                rows.append(current_row)
+                current_row = [char]
+            else:
+                current_row.append(char)
+        rows.append(current_row)
+
+        # Sort each row left-to-right
+        for row in rows:
+            row.sort(key=lambda c: c['x'])
+
+        sorted_flat = [c for row in rows for c in row]
+        return rows, sorted_flat
+
+    # ============================================================
+    # OCR
+    # ============================================================
+    def _perform_ocr(self, cropped_plate):
+        """
+        Perform OCR on cropped plate using Nepali model with Debugging
         """
         if self.ocr_model is None:
+            self.logger.error("DEBUG: OCR Model is None!")
             return '', []
 
         try:
-            results = self.ocr_model(cropped_plate, conf=0.25, verbose=False)
+            # 1. Image Info Debug
+            h, w = cropped_plate.shape[:2]
+            self.logger.info(f"DEBUG: OCR starting. Crop size: {w}x{h}")
 
-            if len(results) == 0 or results[0].boxes is None or len(results[0].boxes) == 0:
+            # 2. Run Inference
+            results = self.ocr_model(cropped_plate, conf=0.2, iou=0.25,agnostic_nms=True, verbose=True) # Lowered conf for debug
+
+            if not results or results[0].boxes is None or len(results[0].boxes) == 0:
+                self.logger.warning("DEBUG: OCR Model detected ZERO boxes.")
                 return '', []
 
-            # -------- EXTRACT DETECTIONS --------
+            # Extract raw detections
             boxes = results[0].boxes.xyxy.cpu().numpy()
             confidences = results[0].boxes.conf.cpu().numpy()
             classes = results[0].boxes.cls.cpu().numpy()
-            class_names = results[0].names
-
-            characters = []
-            for box, conf, cls in zip(boxes, confidences, classes):
-                x1, y1, x2, y2 = box
-                center_x = (x1 + x2) / 2
-                center_y = (y1 + y2) / 2
-
-                characters.append({
-                    'char': class_names[int(cls)],
-                    'confidence': float(conf),
-                    'x': float(center_x),
-                    'y': float(center_y),
-                    'top_y': float(y1),   # IMPORTANT FOR ROW CLUSTERING
-                    'box': [float(x1), float(y1), float(x2), float(y2)]
-                })
-
-            if len(characters) == 0:
-                return '', []
-
-            # -------- CHECK SINGLE VS TWO ROW --------
-            y_vals = np.array([c['top_y'] for c in characters])
-            h_vals = np.array([c['box'][3] - c['box'][1] for c in characters])
-
-            y_range = y_vals.max() - y_vals.min()
-            avg_h = np.mean(h_vals)
-
-            # -------- SINGLE ROW --------
-            if y_range < 0.8 * avg_h:
-                # Single row - just sort left to right
-                characters.sort(key=lambda c: c['x'])
-                plate_text = ''.join(c['char'] for c in characters)
-
-            # -------- TWO ROW (USE Y-THRESHOLD, NOT KMEANS) --------
-            else:
-                # Find the midpoint Y value
-                y_mid = (y_vals.min() + y_vals.max()) / 2
-                
-                # Split into rows based on Y position
-                top_row = [c for c in characters if c['top_y'] < y_mid]
-                bottom_row = [c for c in characters if c['top_y'] >= y_mid]
-                
-                # Sort each row left to right
-                top_row.sort(key=lambda c: c['x'])
-                bottom_row.sort(key=lambda c: c['x'])
-                
-                # Concatenate without space: top row first, then bottom row
-                plate_text = ''.join(c['char'] for c in top_row) + ''.join(c['char'] for c in bottom_row)
-
-            self.logger.info(f"OCR result: {plate_text}")
-            return plate_text, characters
-
-        except Exception as e:
-            self.logger.error(f"Error performing OCR: {e}")
-            return '', []
-
-    
-    def _perform_easyocr(self, cropped_plate):
-        """
-        Perform OCR on embossed plate using EasyOCR (English characters)
-
-        Returns:
-            tuple: (plate_text, character_details)
-        """
-        reader = self._get_easyocr_reader()
-        if reader is None:
-            self.logger.warning("EasyOCR not available, falling back to Nepali OCR")
-            return self._perform_ocr(cropped_plate)
-
-        try:
-            # Preprocess: convert to grayscale + slight upscale for better accuracy
-            gray = cv2.cvtColor(cropped_plate, cv2.COLOR_BGR2GRAY)
-            scale = max(1.0, 200 / gray.shape[0])  # ensure at least 200px height
-            if scale > 1.0:
-                gray = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
             
-            # EasyOCR expects BGR or RGB; pass grayscale as-is
-            results = reader.readtext(gray, detail=1, paragraph=False,
-                                      allowlist='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-')
+            self.logger.info(f"DEBUG: Raw detections found: {len(boxes)}")
 
-            if not results:
-                return '', []
-
-            # Sort detections left-to-right (by x center of bounding box)
-            results.sort(key=lambda r: (r[0][0][0] + r[0][2][0]) / 2)
+            # --- VISUAL DEBUG: Draw every single raw detection ---
+            debug_img = cropped_plate.copy()
+            
+            PROVINCE_CLASS_IDS = {34, 35, 36, 37}
+            PROVINCE_CONF      = 0.1
+            PROVINCE_MIN_RATIO = 2
+            CHAR_CONF          = 0.25
 
             characters = []
-            texts = []
-            for (bbox_pts, text, conf) in results:
-                # bbox_pts: [[x1,y1],[x2,y1],[x2,y2],[x1,y2]]
-                x_coords = [p[0] for p in bbox_pts]
-                y_coords = [p[1] for p in bbox_pts]
-                center_x = sum(x_coords) / 4
-                center_y = sum(y_coords) / 4
+            for i, (box, conf, cls) in enumerate(zip(boxes, confidences, classes)):
+                x1, y1, x2, y2 = map(int, box)
+                cls_id = int(cls)
+                label = self.OCR_CLASS_NAMES.get(cls_id, f'?{cls_id}')
+                bw, bh = (x2 - x1), (y2 - y1)
+                ratio = bw / bh if bh > 0 else 0.0
+                conf_f = float(conf)
 
-                clean = text.strip().upper()
-                if clean:
-                    texts.append(clean)
+                # Log every single hit to console
+                self.logger.info(f"  [Det {i}] {label} | Conf: {conf_f:.2f} | Ratio: {ratio:.2f}")
+
+                # Draw on debug image (Yellow = Raw, Green = Accepted, Red = Filtered Out)
+                color = (0, 255, 255) # Default Yellow
+                
+                is_accepted = False
+                MAX_CHAR_RATIO = 2.0  # Normal characters shouldn't be twice as wide as they are tall
+
+                if cls_id in PROVINCE_CLASS_IDS:
+                    # PROVINCE logic: Must be WIDE
+                    if ratio >= PROVINCE_MIN_RATIO and conf_f >= PROVINCE_CONF:
+                        is_accepted = True
+                else:
+                    # CHARACTER logic: Must NOT be too wide
+                    if conf_f >= CHAR_CONF and ratio < MAX_CHAR_RATIO:
+                        is_accepted = True
+                    else:
+                        # This will now catch that stretched JHA and turn it RED
+                        self.logger.info(f"  [REJECTED] {label} - Ratio {ratio:.2f} too high for a char")
+
+                cv2.rectangle(debug_img, (x1, y1), (x2, y2), color, 1)
+                cv2.putText(debug_img, f"{label} {conf_f:.1f}", (x1, y1-5), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.3, color, 1)
+
+                if is_accepted:
                     characters.append({
-                        'char': clean,
-                        'confidence': float(conf),
-                        'x': float(center_x),
-                        'y': float(center_y),
+                        'char': label,
+                        'confidence': conf_f,
+                        'x': float((x1 + x2) / 2),
+                        'top_y': float(y1),
+                        'box': [float(x1), float(y1), float(x2), float(y2)],
                     })
 
-            plate_text = ''.join(texts)
-            self.logger.info(f"EasyOCR result: {plate_text}")
-            return plate_text, characters
+            # Save the debug image to see what's happening
+            debug_path = os.path.join(self.upload_folder, "last_ocr_debug.jpg")
+            cv2.imwrite(debug_path, debug_img)
+            self.logger.info(f"DEBUG: Saved visual check to {debug_path}")
+
+            if not characters:
+                self.logger.warning("DEBUG: All detections were filtered out by Ratio or Confidence!")
+                return '', []
+
+            # Sort and finish
+            rows, sorted_flat = self._sort_characters(characters)
+            plate_text = ''.join(c['char'] for c in sorted_flat)
+            return plate_text, sorted_flat
 
         except Exception as e:
-            self.logger.error(f"Error in EasyOCR: {e}")
+            self.logger.error(f"DEBUG: OCR Exception: {e}", exc_info=True)
             return '', []
 
     # ============================================================
