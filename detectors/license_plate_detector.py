@@ -505,7 +505,68 @@ class LicensePlateDetector:
         except Exception as e:
             self.logger.error(f"DEBUG: OCR Exception: {e}", exc_info=True)
             return '', []
+        
+        
+    def _perform_easyocr(self, cropped_plate):
+        """
+        Perform OCR on embossed plate using EasyOCR (English characters)
+        """
+        reader = self._get_easyocr_reader()
+        if reader is None:
+            self.logger.warning("EasyOCR not available, falling back to Nepali OCR")
+            return self._perform_ocr(cropped_plate)
 
+        try:
+            # Preprocess: convert to grayscale + slight upscale for better accuracy
+            gray = cv2.cvtColor(cropped_plate, cv2.COLOR_BGR2GRAY)
+            
+            # Ensure the image is large enough for EasyOCR
+            h, w = gray.shape[:2]
+            scale = max(1.0, 200 / h)  # target 200px height
+            if scale > 1.0:
+                gray = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+            
+            # EasyOCR inference
+            # allowlist restricts results to standard Plate characters
+            results = reader.readtext(gray, detail=1, paragraph=False,
+                                     allowlist='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-')
+
+            if not results:
+                return '', []
+
+            # Sort results by position (Top to Bottom, then Left to Right)
+            results.sort(key=lambda r: (
+                (r[0][0][1] + r[0][2][1]) / 2,  # center_y
+                (r[0][0][0] + r[0][2][0]) / 2   # center_x
+            ))
+
+            characters = []
+            texts = []
+            for (bbox_pts, text, conf) in results:
+                x_coords = [p[0] for p in bbox_pts]
+                y_coords = [p[1] for p in bbox_pts]
+                center_x = sum(x_coords) / 4
+                center_y = sum(y_coords) / 4
+
+                clean = text.strip().upper()
+                if clean:
+                    texts.append(clean)
+                    characters.append({
+                        'char': clean,
+                        'confidence': float(conf),
+                        'x': float(center_x),
+                        'y': float(center_y),
+                        'box': [float(min(x_coords)), float(min(y_coords)), 
+                                float(max(x_coords)), float(max(y_coords))]
+                    })
+
+            plate_text = ''.join(texts)
+            self.logger.info(f"EasyOCR result: {plate_text}")
+            return plate_text, characters
+
+        except Exception as e:
+            self.logger.error(f"Error in EasyOCR: {e}")
+            return '', []
     # ============================================================
     # UTILITY METHODS
     # ============================================================
