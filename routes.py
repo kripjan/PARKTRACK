@@ -257,12 +257,7 @@ def upload_plate_image():
         file.save(filepath)
         
         # Process image
-<<<<<<< HEAD
         result = license_plate_detector.detect_from_image(filepath, save_cropped=True, is_embossed=is_embossed)        
-=======
-        result = license_plate_detector.detect_from_image(filepath, save_cropped=True, is_embossed=is_embossed)
-        
->>>>>>> 23f361fe4464f65b4bda1c6ad4a78a80d1965589
         if not result['success']:
             return jsonify({
                 'success': False,
@@ -451,7 +446,6 @@ def api_revenue_summary():
     summary = report_service.get_revenue_summary(days)
     return jsonify(summary)
 
-<<<<<<< HEAD
 #============================================================================
 # CSV EXPORT ROUTES
 # ============================================================================
@@ -592,8 +586,6 @@ def export_vehicles():
     except Exception as e:
         app.logger.error(f"Error exporting vehicle report: {e}")
         return jsonify({'error': str(e)}), 500
-=======
->>>>>>> 23f361fe4464f65b4bda1c6ad4a78a80d1965589
 
 # ============================================================================
 # WEBSOCKET EVENTS
